@@ -1,0 +1,43 @@
+{% extends "hr/base.html" %}
+
+{% block title %}Шаблоны писем - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Directory</p>
+        <h1>Шаблоны писем</h1>
+    </div>
+    {% if perms.hr.add_emailtemplate %}<a class="btn primary" href="{% url 'email_template_create' %}">Добавить шаблон</a>{% endif %}
+</section>
+
+<section class="panel">
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Название</th><th>Тема</th><th>Активен</th><th>Действия</th></tr></thead>
+            <tbody>
+                {% for template in templates %}
+                    <tr>
+                        <td>{{ template.name }}</td>
+                        <td>{{ template.subject }}</td>
+                        <td>{% if template.is_active %}<span class="badge badge-green">да</span>{% else %}<span class="badge badge-gray">нет</span>{% endif %}</td>
+                        <td>
+                            <div class="inline-actions">
+                                {% if perms.hr.change_emailtemplate %}<a href="{% url 'email_template_edit' template.pk %}">Редактировать</a>{% endif %}
+                                {% if perms.hr.delete_emailtemplate %}
+                                    <form method="post" action="{% url 'email_template_delete' template.pk %}">
+                                        {% csrf_token %}
+                                        <button class="link-button danger-link" type="submit">Удалить</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" class="empty">Шаблоны пока не созданы.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

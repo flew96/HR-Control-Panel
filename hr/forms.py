@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import Campaign, CampaignRecord, Department, Employee
+from .models import Campaign, CampaignRecord, Department, EmailTemplate, Employee, Position, ReferenceItem
 
 
 class DateInput(forms.DateInput):
@@ -20,6 +20,7 @@ class EmployeeForm(forms.ModelForm):
             "manager",
             "hire_date",
             "dismissal_date",
+            "dismissal_reason",
             "is_active",
             "ipr_status",
             "contract_type",
@@ -94,3 +95,48 @@ class CampaignRecordForm(forms.ModelForm):
         ).order_by("last_name", "first_name")
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+
+
+class PositionForm(forms.ModelForm):
+    class Meta:
+        model = Position
+        fields = ["name"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+
+class ReferenceItemForm(forms.ModelForm):
+    class Meta:
+        model = ReferenceItem
+        fields = ["category", "code", "name", "description", "is_active"]
+        widgets = {"description": forms.Textarea(attrs={"rows": 4})}
+
+    def __init__(self, *args, **kwargs):
+        category = kwargs.pop("category", None)
+        super().__init__(*args, **kwargs)
+        if category:
+            self.fields["category"].initial = category
+            self.fields["category"].widget = forms.HiddenInput()
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault("class", "checkbox-input")
+            elif not isinstance(field.widget, forms.HiddenInput):
+                field.widget.attrs.setdefault("class", "form-control")
+
+
+class EmailTemplateForm(forms.ModelForm):
+    class Meta:
+        model = EmailTemplate
+        fields = ["name", "subject", "body", "is_active"]
+        widgets = {"body": forms.Textarea(attrs={"rows": 8})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault("class", "checkbox-input")
+            else:
+                field.widget.attrs.setdefault("class", "form-control")

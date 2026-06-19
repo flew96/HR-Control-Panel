@@ -7,6 +7,27 @@ from django.utils import timezone
 from .models import AuditLog, ChangeLog, Employee
 
 
+FIELD_LABELS = {
+    "first_name": "Имя",
+    "last_name": "Фамилия",
+    "middle_name": "Отчество",
+    "email": "Email",
+    "department": "Подразделение",
+    "position": "Должность",
+    "manager": "Руководитель",
+    "hire_date": "Дата найма",
+    "dismissal_date": "Дата увольнения",
+    "dismissal_reason": "Причина увольнения",
+    "is_active": "Активен",
+    "ipr_status": "Статус ИПР",
+    "contract_type": "Тип договора",
+    "contract_end_date": "Дата окончания договора",
+    "salary_gross": "Gross",
+    "salary_net": "Net",
+    "currency": "Валюта",
+}
+
+
 def snapshot_instance(instance):
     if instance is None:
         return None
@@ -66,6 +87,34 @@ def employee_for_object(obj):
     return getattr(obj, "employee", None)
 
 
+def diff_snapshots(before, after):
+    before = before or {}
+    after = after or {}
+    diffs = []
+    for key in sorted(set(before) | set(after)):
+        if before.get(key) == after.get(key):
+            continue
+        diffs.append(
+            {
+                "field": key,
+                "label": FIELD_LABELS.get(key, key),
+                "before": _display_value(before.get(key)),
+                "after": _display_value(after.get(key)),
+            }
+        )
+    return diffs
+
+
+def audit_logs_with_diffs(logs):
+    return [
+        {
+            "log": log,
+            "diffs": diff_snapshots(log.before, log.after),
+        }
+        for log in logs
+    ]
+
+
 def _json_value(value):
     if isinstance(value, (datetime, date)):
         return value.isoformat()
@@ -76,9 +125,16 @@ def _json_value(value):
     return value
 
 
+def _display_value(value):
+    if value is None or value == "":
+        return "-"
+    if isinstance(value, bool):
+        return "да" if value else "нет"
+    return str(value)
+
+
 def _client_ip(request):
     forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR")
-

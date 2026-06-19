@@ -7,10 +7,13 @@ from .models import (
     ChangeLog,
     Contract,
     Department,
+    EmailTemplate,
     EmployeeColumnPreference,
     Employee,
     Position,
     Probation,
+    ReferenceItem,
+    UserDepartmentAccess,
 )
 
 
@@ -24,3 +27,6 @@ admin.site.register(Contract)
 admin.site.register(ChangeLog)
 admin.site.register(AuditLog)
 admin.site.register(EmployeeColumnPreference)
+admin.site.register(ReferenceItem)
+admin.site.register(EmailTemplate)
+admin.site.register(UserDepartmentAccess)

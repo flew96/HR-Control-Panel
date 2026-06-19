@@ -22,6 +22,9 @@
                 <div class="dropdown-menu">
                     <a href="{% url 'guide' %}">Руководство</a>
                     <a href="{% url 'positions' %}">Должности</a>
+                    <a href="{% url 'reference_directory' 'contract-types' %}">Типы договоров</a>
+                    <a href="{% url 'reference_directory' 'dismissal-reasons' %}">Причины увольнения</a>
+                    <a href="{% url 'reference_directory' 'calendar-event-types' %}">Типы событий</a>
                     <a href="{% url 'mail_templates' %}">Шаблоны писем</a>
                     <a href="{% url 'users' %}">Пользователи</a>
                     <a href="{% url 'data_audit' %}">Аудит-лог данных</a>

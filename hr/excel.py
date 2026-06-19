@@ -7,7 +7,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .models import Contract, Department, Employee, Position
+from .audit import snapshot_instance
+from .models import Contract, Department, Employee, Position, ReferenceItem
 
 
 EMPLOYEE_XLSX_COLUMNS = [
@@ -21,6 +22,7 @@ EMPLOYEE_XLSX_COLUMNS = [
     ("manager_email", "Email руководителя"),
     ("hire_date", "Дата найма"),
     ("dismissal_date", "Дата увольнения"),
+    ("dismissal_reason", "Причина увольнения"),
     ("is_active", "Активен"),
     ("ipr_status", "Статус ИПР"),
     ("contract_type", "Тип договора"),
@@ -30,10 +32,7 @@ EMPLOYEE_XLSX_COLUMNS = [
     ("currency", "Валюта"),
 ]
 
-HEADER_TO_KEY = {
-    label.lower(): key
-    for key, label in EMPLOYEE_XLSX_COLUMNS
-}
+HEADER_TO_KEY = {label.lower(): key for key, label in EMPLOYEE_XLSX_COLUMNS}
 HEADER_TO_KEY.update({key.lower(): key for key, _label in EMPLOYEE_XLSX_COLUMNS})
 
 IPR_BY_LABEL = {label.lower(): value for value, label in Employee.IPR_STATUS_CHOICES}
@@ -46,8 +45,7 @@ def build_employee_workbook(employees, include_rows=True):
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Employees"
-    headers = [label for _key, label in EMPLOYEE_XLSX_COLUMNS]
-    worksheet.append(headers)
+    worksheet.append([label for _key, label in EMPLOYEE_XLSX_COLUMNS])
 
     header_fill = PatternFill("solid", fgColor="EAF1FF")
     for cell in worksheet[1]:
@@ -58,7 +56,7 @@ def build_employee_workbook(employees, include_rows=True):
         for employee in employees:
             worksheet.append(_employee_row(employee))
 
-    widths = [10, 20, 18, 18, 28, 26, 26, 28, 14, 14, 12, 18, 22, 22, 14, 14, 10]
+    widths = [10, 20, 18, 18, 28, 26, 26, 28, 14, 14, 22, 12, 18, 22, 22, 14, 14, 10]
     for index, width in enumerate(widths, start=1):
         worksheet.column_dimensions[get_column_letter(index)].width = width
 
@@ -68,48 +66,72 @@ def build_employee_workbook(employees, include_rows=True):
     return output.getvalue()
 
 
-def import_employees_from_xlsx(file_obj):
+def preview_employees_from_xlsx(file_obj):
     workbook = load_workbook(filename=file_obj, data_only=True)
     worksheet = workbook.active
     rows = worksheet.iter_rows(values_only=True)
     try:
         raw_headers = next(rows)
     except StopIteration:
-        return {"created": 0, "updated": 0, "skipped": 0, "errors": ["Файл пустой."]}
+        return _empty_import_result(["Файл пустой."])
 
     headers = [_normalize_header(header) for header in raw_headers]
     if "last_name" not in headers or "first_name" not in headers:
-        return {
-            "created": 0,
-            "updated": 0,
-            "skipped": 0,
-            "errors": ["Нужны колонки Фамилия/last_name и Имя/first_name."],
-        }
+        return _empty_import_result(["Нужны колонки Фамилия/last_name и Имя/first_name."])
 
-    result = {"created": 0, "updated": 0, "skipped": 0, "errors": []}
-
+    result = _empty_import_result()
     for row_number, raw_row in enumerate(rows, start=2):
         if not raw_row or not any(_has_value(value) for value in raw_row):
             result["skipped"] += 1
             continue
 
         row = {
-            headers[index]: raw_row[index] if index < len(raw_row) else None
+            headers[index]: _session_value(raw_row[index] if index < len(raw_row) else None)
             for index in range(len(headers))
             if headers[index]
         }
+        try:
+            operation = _preview_row(row_number, row)
+        except ValueError as exc:
+            result["errors"].append(f"Строка {row_number}: {exc}")
+            continue
+
+        result["rows"].append(row)
+        result["operations"].append(operation)
+        if operation["action"] == "create":
+            result["created"] += 1
+        else:
+            result["updated"] += 1
+    return result
+
+
+def apply_employee_import_rows(rows):
+    result = {"created": 0, "updated": 0, "skipped": 0, "errors": []}
+    for row_number, row in enumerate(rows, start=2):
         try:
             with transaction.atomic():
                 created = _upsert_employee(row)
         except ValueError as exc:
             result["errors"].append(f"Строка {row_number}: {exc}")
             continue
-
         if created:
             result["created"] += 1
         else:
             result["updated"] += 1
+    return result
 
+
+def import_employees_from_xlsx(file_obj):
+    preview = preview_employees_from_xlsx(file_obj)
+    if preview["errors"]:
+        return {
+            "created": 0,
+            "updated": 0,
+            "skipped": preview["skipped"],
+            "errors": preview["errors"],
+        }
+    result = apply_employee_import_rows(preview["rows"])
+    result["skipped"] = preview["skipped"]
     return result
 
 
@@ -125,6 +147,7 @@ def _employee_row(employee):
         employee.manager.email if employee.manager and employee.manager.email else "",
         employee.hire_date,
         employee.dismissal_date,
+        employee.dismissal_reason.name if employee.dismissal_reason else "",
         employee.is_active,
         employee.get_ipr_status_display(),
         employee.get_contract_type_display(),
@@ -153,40 +176,95 @@ def _upsert_employee(row):
     employee.manager = _get_manager(row.get("manager_email"))
     employee.hire_date = _parse_date(row.get("hire_date"))
     employee.dismissal_date = _parse_date(row.get("dismissal_date"))
+    employee.dismissal_reason = _get_dismissal_reason(row.get("dismissal_reason"))
     employee.is_active = _parse_bool(row.get("is_active"), default=True)
-    employee.ipr_status = _choice_value(
-        row.get("ipr_status"),
-        IPR_BY_VALUE,
-        IPR_BY_LABEL,
-        Employee.IPR_NONE,
-        "статус ИПР",
-    )
-    employee.contract_type = _choice_value(
-        row.get("contract_type"),
-        CONTRACT_BY_VALUE,
-        CONTRACT_BY_LABEL,
-        Employee.CONTRACT_LABOR,
-        "тип договора",
-    )
+    employee.ipr_status = _choice_value(row.get("ipr_status"), IPR_BY_VALUE, IPR_BY_LABEL, Employee.IPR_NONE, "статус ИПР")
+    employee.contract_type = _choice_value(row.get("contract_type"), CONTRACT_BY_VALUE, CONTRACT_BY_LABEL, Employee.CONTRACT_LABOR, "тип договора")
     employee.contract_end_date = _parse_date(row.get("contract_end_date"))
     employee.salary_gross = _parse_decimal(row.get("salary_gross"))
     employee.salary_net = _parse_decimal(row.get("salary_net"))
-    employee.currency = _choice_value(
-        row.get("currency"),
-        {"RUB": "RUB", "EUR": "EUR"},
-        {"rub": "RUB", "eur": "EUR"},
-        "RUB",
-        "валюта",
-    )
+    employee.currency = _choice_value(row.get("currency"), {"RUB": "RUB", "EUR": "EUR"}, {"rub": "RUB", "eur": "EUR"}, "RUB", "валюта")
     employee.save()
+
     Contract.objects.update_or_create(
         employee=employee,
-        defaults={
-            "contract_type": employee.contract_type,
-            "end_date": employee.contract_end_date,
-        },
+        defaults={"contract_type": employee.contract_type, "end_date": employee.contract_end_date},
     )
     return created
+
+
+def _preview_row(row_number, row):
+    existing = _find_employee(row)
+    before = _human_snapshot(existing) if existing else {}
+    after = _preview_snapshot(existing, row)
+    return {
+        "row_number": row_number,
+        "action": "update" if existing else "create",
+        "employee": str(existing) if existing else _preview_full_name(row),
+        "email": _clean_text(row.get("email")),
+        "changes": _preview_changes(before, after),
+    }
+
+
+def _human_snapshot(employee):
+    if not employee:
+        return {}
+    data = snapshot_instance(employee)
+    data["department"] = employee.department.name if employee.department else ""
+    data["position"] = employee.position.name if employee.position else ""
+    data["manager"] = employee.manager.email if employee.manager else ""
+    data["dismissal_reason"] = employee.dismissal_reason.name if employee.dismissal_reason else ""
+    return data
+
+
+def _preview_snapshot(existing, row):
+    current = _human_snapshot(existing)
+    current.update(
+        {
+            "last_name": _clean_text(row.get("last_name")),
+            "first_name": _clean_text(row.get("first_name")),
+            "middle_name": _clean_text(row.get("middle_name")),
+            "email": _clean_text(row.get("email")),
+            "department": _clean_text(row.get("department")),
+            "position": _clean_text(row.get("position")),
+            "manager": _clean_text(row.get("manager_email")),
+            "hire_date": _date_to_string(_parse_date(row.get("hire_date"))),
+            "dismissal_date": _date_to_string(_parse_date(row.get("dismissal_date"))),
+            "dismissal_reason": _clean_text(row.get("dismissal_reason")),
+            "is_active": _parse_bool(row.get("is_active"), default=True),
+            "ipr_status": _choice_value(row.get("ipr_status"), IPR_BY_VALUE, IPR_BY_LABEL, Employee.IPR_NONE, "статус ИПР"),
+            "contract_type": _choice_value(row.get("contract_type"), CONTRACT_BY_VALUE, CONTRACT_BY_LABEL, Employee.CONTRACT_LABOR, "тип договора"),
+            "contract_end_date": _date_to_string(_parse_date(row.get("contract_end_date"))),
+            "salary_gross": _decimal_to_string(_parse_decimal(row.get("salary_gross"))),
+            "salary_net": _decimal_to_string(_parse_decimal(row.get("salary_net"))),
+            "currency": _choice_value(row.get("currency"), {"RUB": "RUB", "EUR": "EUR"}, {"rub": "RUB", "eur": "EUR"}, "RUB", "валюта"),
+        }
+    )
+    if not current["last_name"] or not current["first_name"]:
+        raise ValueError("фамилия и имя обязательны.")
+    return current
+
+
+def _preview_changes(before, after):
+    changes = []
+    for key in sorted(after):
+        before_value = before.get(key)
+        after_value = after.get(key)
+        if str(before_value or "") == str(after_value or ""):
+            continue
+        changes.append(
+            {
+                "field": key,
+                "before": before_value if before_value not in [None, ""] else "-",
+                "after": after_value if after_value not in [None, ""] else "-",
+            }
+        )
+    return changes
+
+
+def _preview_full_name(row):
+    parts = [_clean_text(row.get("last_name")), _clean_text(row.get("first_name"))]
+    return " ".join(part for part in parts if part) or "Новый сотрудник"
 
 
 def _find_employee(row):
@@ -224,6 +302,18 @@ def _get_manager(value):
     if not email:
         return None
     return Employee.objects.filter(email__iexact=email).first()
+
+
+def _get_dismissal_reason(value):
+    name = _clean_text(value)
+    if not name:
+        return None
+    item, _created = ReferenceItem.objects.get_or_create(
+        category=ReferenceItem.CATEGORY_DISMISSAL_REASON,
+        name=name,
+        defaults={"code": _slugish(name), "is_active": True},
+    )
+    return item
 
 
 def _normalize_header(header):
@@ -292,3 +382,29 @@ def _choice_value(value, by_value, by_label, default, label):
         return by_label[lowered]
     raise ValueError(f"некорректное значение поля {label}: {text}.")
 
+
+def _empty_import_result(errors=None):
+    return {"created": 0, "updated": 0, "skipped": 0, "errors": errors or [], "operations": [], "rows": []}
+
+
+def _session_value(value):
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
+
+def _date_to_string(value):
+    return value.isoformat() if value else ""
+
+
+def _decimal_to_string(value):
+    return str(value) if value is not None else ""
+
+
+def _slugish(value):
+    text = "".join(char.lower() if char.isalnum() else "-" for char in value)
+    return "-".join(part for part in text.split("-") if part)[:80] or "item"

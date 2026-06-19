@@ -31,7 +31,15 @@
     </div>
 </section>
 
-<section class="detail-grid">
+<nav class="tabs" data-tabs>
+    <button class="tab-button active" type="button" data-tab-target="profile">Профиль</button>
+    <button class="tab-button" type="button" data-tab-target="contracts">Договоры и оплата</button>
+    <button class="tab-button" type="button" data-tab-target="probation">Испытательный срок</button>
+    <button class="tab-button" type="button" data-tab-target="campaigns">Кампании</button>
+    <button class="tab-button" type="button" data-tab-target="history">История</button>
+</nav>
+
+<section class="tab-panel active" data-tab-panel="profile">
     <div class="panel">
         <div class="panel-header"><h2>Основная информация</h2></div>
         <dl class="detail-list">
@@ -41,50 +49,74 @@
             <dt>Руководитель</dt><dd>{{ employee.manager.full_name|default:"-" }}</dd>
             <dt>Дата найма</dt><dd>{{ employee.hire_date|date:"d.m.Y"|default:"-" }}</dd>
             <dt>Дата увольнения</dt><dd>{{ employee.dismissal_date|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Причина увольнения</dt><dd>{{ employee.dismissal_reason|default:"-" }}</dd>
             <dt>Статус ИПР</dt><dd><span class="status status-{{ employee.ipr_status }}">{{ employee.get_ipr_status_display }}</span></dd>
-        </dl>
-    </div>
-    <div class="panel">
-        <div class="panel-header"><h2>Оплата и договор</h2></div>
-        <dl class="detail-list">
-            <dt>Тип договора</dt><dd>{{ employee.get_contract_type_display|default:"-" }}</dd>
-            <dt>Дата окончания</dt><dd>{{ employee.contract_end_date|date:"d.m.Y"|default:"-" }}</dd>
-            <dt>Gross</dt><dd>{{ employee.salary_gross|default:"-" }} {{ employee.currency }}</dd>
-            <dt>Net</dt><dd>{{ employee.salary_net|default:"-" }} {{ employee.currency }}</dd>
         </dl>
     </div>
 </section>
 
-<section class="dashboard-grid">
-    <div class="panel">
-        <div class="panel-header"><h2>Договоры</h2></div>
-        <div class="table-wrap">
-            <table>
-                <thead><tr><th>Тип</th><th>Дата окончания</th></tr></thead>
-                <tbody>
-                    {% for contract in contracts %}
-                        <tr><td>{{ contract.get_contract_type_display }}</td><td>{{ contract.end_date|date:"d.m.Y"|default:"-" }}</td></tr>
-                    {% empty %}
-                        <tr><td colspan="2" class="empty">Договоры не заведены.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+<section class="tab-panel" data-tab-panel="contracts">
+    <div class="detail-grid">
+        <div class="panel">
+            <div class="panel-header"><h2>Оплата</h2></div>
+            <dl class="detail-list">
+                <dt>Gross</dt><dd>{{ employee.salary_gross|default:"-" }} {{ employee.currency }}</dd>
+                <dt>Net</dt><dd>{{ employee.salary_net|default:"-" }} {{ employee.currency }}</dd>
+                <dt>Валюта</dt><dd>{{ employee.currency }}</dd>
+                <dt>Текущий тип договора</dt><dd>{{ employee.get_contract_type_display|default:"-" }}</dd>
+                <dt>Текущая дата окончания</dt><dd>{{ employee.contract_end_date|date:"d.m.Y"|default:"-" }}</dd>
+            </dl>
+        </div>
+        <div class="panel">
+            <div class="panel-header"><h2>Договоры</h2></div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Тип</th><th>Дата окончания</th></tr></thead>
+                    <tbody>
+                        {% for contract in contracts %}
+                            <tr><td>{{ contract.get_contract_type_display }}</td><td>{{ contract.end_date|date:"d.m.Y"|default:"-" }}</td></tr>
+                        {% empty %}
+                            <tr><td colspan="2" class="empty">Договоры не заведены.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
+</section>
+
+<section class="tab-panel" data-tab-panel="probation">
+    <div class="panel">
+        <div class="panel-header"><h2>Испытательный срок</h2></div>
+        {% if probation %}
+            <dl class="detail-list">
+                <dt>Начало</dt><dd>{{ probation.start_date|date:"d.m.Y" }}</dd>
+                <dt>Окончание</dt><dd>{{ probation.end_date|date:"d.m.Y" }}</dd>
+                <dt>Результат</dt><dd>{{ probation.get_result_display }}</dd>
+                <dt>Комментарий</dt><dd>{{ probation.comment|default:"-" }}</dd>
+            </dl>
+        {% else %}
+            <p class="empty">Запись испытательного срока не заведена.</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="tab-panel" data-tab-panel="campaigns">
     <div class="panel">
         <div class="panel-header"><h2>Записи кампаний</h2></div>
         <div class="table-wrap">
             <table>
-                <thead><tr><th>Кампания</th><th>Статус</th><th>Значение</th></tr></thead>
+                <thead><tr><th>Кампания</th><th>Статус</th><th>Значение</th><th>Комментарий</th></tr></thead>
                 <tbody>
                     {% for record in campaign_records %}
                         <tr>
                             <td><a href="{% url 'campaign_detail' record.campaign.pk %}">{{ record.campaign }}</a></td>
                             <td>{{ record.get_status_display }}</td>
                             <td>{{ record.value|default:"-" }}</td>
+                            <td>{{ record.comment|default:"-" }}</td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="3" class="empty">Нет записей кампаний.</td></tr>
+                        <tr><td colspan="4" class="empty">Нет записей кампаний.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -92,19 +124,34 @@
     </div>
 </section>
 
-<section class="panel">
-    <div class="panel-header"><h2>История изменений</h2></div>
-    <div class="table-wrap">
-        <table>
-            <thead><tr><th>Дата</th><th>Событие</th></tr></thead>
-            <tbody>
-                {% for change in changes %}
-                    <tr><td>{{ change.created_at|date:"d.m.Y H:i" }}</td><td>{{ change.event }}</td></tr>
-                {% empty %}
-                    <tr><td colspan="2" class="empty">История пока пустая.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<section class="tab-panel" data-tab-panel="history">
+    <div class="panel">
+        <div class="panel-header"><h2>История изменений по полям</h2></div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Дата</th><th>Пользователь</th><th>Событие</th><th>Изменения</th></tr></thead>
+                <tbody>
+                    {% for entry in audit_entries %}
+                        <tr>
+                            <td>{{ entry.log.created_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ entry.log.actor.username|default:"Система" }}</td>
+                            <td>{{ entry.log.event }}</td>
+                            <td>
+                                <div class="diff-list">
+                                    {% for diff in entry.diffs %}
+                                        <span>{{ diff.label }}: {{ diff.before }} -> {{ diff.after }}</span>
+                                    {% empty %}
+                                        <span>Нет детализации</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4" class="empty">История пока пустая.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </section>
 {% endblock %}

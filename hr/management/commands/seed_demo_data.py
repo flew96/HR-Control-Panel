@@ -14,10 +14,13 @@ from hr.models import (
     ChangeLog,
     Contract,
     Department,
+    EmailTemplate,
     Employee,
     EmployeeColumnPreference,
     Position,
     Probation,
+    ReferenceItem,
+    UserDepartmentAccess,
 )
 
 
@@ -31,9 +34,13 @@ class Command(BaseCommand):
         self._clear_data()
         users = self._create_roles_and_users()
         departments = self._create_departments()
+        reference_items = self._create_reference_items()
+        self._create_email_templates()
         positions = self._create_positions()
-        employees = self._create_employees(rng, today, departments, positions)
+        self._create_department_access(users, departments)
+        employees = self._create_employees(rng, today, departments, positions, reference_items)
         self._assign_managers(rng, employees)
+        self._bind_line_manager_user(users, employees)
         self._create_probations(today, employees)
         self._create_campaigns(rng, today, employees)
         self._create_change_logs(rng, today, employees, users)
@@ -53,25 +60,30 @@ class Command(BaseCommand):
             Probation,
             Contract,
             EmployeeColumnPreference,
+            UserDepartmentAccess,
             AuditLog,
             ChangeLog,
             Employee,
+            EmailTemplate,
+            ReferenceItem,
             Department,
             Position,
         ]:
             model.objects.all().delete()
 
     def _create_roles_and_users(self):
-        group_names = ["HR Admin", "HR Manager", "HR Viewer"]
+        group_names = ["HR Admin", "HR Manager", "HR Viewer", "HRBP", "Line Manager"]
         for name in group_names:
             Group.objects.filter(name=name).delete()
 
         User = get_user_model()
-        User.objects.filter(username__in=["hr_admin", "hr_manager", "hr_viewer"]).delete()
+        User.objects.filter(username__in=["hr_admin", "hr_manager", "hr_viewer", "hr_bp", "line_manager"]).delete()
 
         admin_group = Group.objects.create(name="HR Admin")
         manager_group = Group.objects.create(name="HR Manager")
         viewer_group = Group.objects.create(name="HR Viewer")
+        hrbp_group = Group.objects.create(name="HRBP")
+        line_manager_group = Group.objects.create(name="Line Manager")
 
         hr_permissions = list(Permission.objects.filter(content_type__app_label="hr"))
         user_permissions = list(
@@ -96,6 +108,8 @@ class Command(BaseCommand):
             if permission.codename.startswith("view_")
         ]
         viewer_group.permissions.set(viewer_permissions)
+        hrbp_group.permissions.set(manager_permissions)
+        line_manager_group.permissions.set(viewer_permissions)
 
         admin = User.objects.create_user(
             username="hr_admin",
@@ -120,14 +134,102 @@ class Command(BaseCommand):
             first_name="HR",
             last_name="Viewer",
         )
+        hrbp = User.objects.create_user(
+            username="hr_bp",
+            password="Hrbp12345!",
+            email="hr_bp@example.test",
+            first_name="HR",
+            last_name="BP",
+        )
+        line_manager = User.objects.create_user(
+            username="line_manager",
+            password="Line12345!",
+            email="line_manager@example.test",
+            first_name="Line",
+            last_name="Manager",
+        )
         admin.groups.add(admin_group)
         manager.groups.add(manager_group)
         viewer.groups.add(viewer_group)
+        hrbp.groups.add(hrbp_group)
+        line_manager.groups.add(line_manager_group)
 
-        for user in [admin, manager, viewer]:
+        for user in [admin, manager, viewer, hrbp, line_manager]:
             EmployeeColumnPreference.objects.get_or_create(user=user)
 
-        return {"admin": admin, "manager": manager, "viewer": viewer}
+        return {
+            "admin": admin,
+            "manager": manager,
+            "viewer": viewer,
+            "hrbp": hrbp,
+            "line_manager": line_manager,
+        }
+
+    def _create_reference_items(self):
+        items = {
+            "dismissal_reasons": [],
+        }
+        for code, name in [
+            ("labor", "трудовой договор"),
+            ("gph", "GPH"),
+            ("self-employed", "самозанятый"),
+            ("internship", "стажировка"),
+        ]:
+            ReferenceItem.objects.create(
+                category=ReferenceItem.CATEGORY_CONTRACT_TYPE,
+                code=code,
+                name=name,
+            )
+        for code, name in [
+            ("own-will", "по собственному желанию"),
+            ("probation-failed", "не прошёл испытательный срок"),
+            ("agreement", "по соглашению сторон"),
+            ("contract-ended", "окончание договора"),
+        ]:
+            items["dismissal_reasons"].append(
+                ReferenceItem.objects.create(
+                    category=ReferenceItem.CATEGORY_DISMISSAL_REASON,
+                    code=code,
+                    name=name,
+                )
+            )
+        for code, name in [
+            ("hire", "приём"),
+            ("dismissal", "увольнение"),
+            ("probation", "испытательный срок"),
+            ("ipr", "ИПР"),
+            ("campaign", "кампания"),
+        ]:
+            ReferenceItem.objects.create(
+                category=ReferenceItem.CATEGORY_CALENDAR_EVENT_TYPE,
+                code=code,
+                name=name,
+            )
+        return items
+
+    def _create_email_templates(self):
+        EmailTemplate.objects.create(
+            name="Добро пожаловать",
+            subject="Добро пожаловать в команду",
+            body="Здравствуйте, {{ first_name }}! Рады видеть вас в команде.",
+        )
+        EmailTemplate.objects.create(
+            name="Напоминание об испытательном сроке",
+            subject="Скоро финальная оценка испытательного срока",
+            body="Добрый день! Проверьте этапы испытательного срока сотрудника {{ employee_name }}.",
+        )
+        EmailTemplate.objects.create(
+            name="Старт оценочной кампании",
+            subject="Старт кампании {{ campaign_name }}",
+            body="Коллеги, оценочная кампания открыта. Пожалуйста, заполните записи до даты закрытия.",
+        )
+
+    def _create_department_access(self, users, departments):
+        UserDepartmentAccess.objects.create(
+            user=users["hrbp"],
+            department=departments["Engineering"],
+            include_children=True,
+        )
 
     def _create_departments(self):
         department_specs = [
@@ -196,7 +298,7 @@ class Command(BaseCommand):
         ]
         return [Position.objects.create(name=name) for name in names]
 
-    def _create_employees(self, rng, today, departments, positions):
+    def _create_employees(self, rng, today, departments, positions, reference_items):
         first_names = [
             "Алексей",
             "Мария",
@@ -385,6 +487,8 @@ class Command(BaseCommand):
                 "salary_net": salary_net,
                 "currency": currency,
             }
+            if not is_active:
+                payload["dismissal_reason"] = rng.choice(reference_items["dismissal_reasons"])
             if index < len(edge_cases):
                 payload.update(edge_cases[index])
                 payload.setdefault("department", department)
@@ -399,6 +503,14 @@ class Command(BaseCommand):
             employees.append(employee)
 
         return employees
+
+    def _bind_line_manager_user(self, users, employees):
+        manager_employee = next((employee for employee in employees if employee.direct_reports.exists()), employees[0])
+        if not manager_employee.email:
+            manager_employee.email = "line.manager@example.test"
+            manager_employee.save(update_fields=["email"])
+        users["line_manager"].email = manager_employee.email
+        users["line_manager"].save(update_fields=["email"])
 
     def _random_date(self, rng, start, end):
         return start + timedelta(days=rng.randint(0, (end - start).days))

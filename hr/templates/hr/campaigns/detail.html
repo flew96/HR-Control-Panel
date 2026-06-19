@@ -13,6 +13,20 @@
             <span class="badge badge-gray">{{ campaign.get_status_display }}</span>
         {% endif %}
     </div>
+    {% if perms.hr.change_campaign %}
+        <div class="header-actions">
+            <form method="post" action="{% url 'campaign_status_update' campaign.pk %}">
+                {% csrf_token %}
+                {% if campaign.status == "open" %}
+                    <input type="hidden" name="action" value="close">
+                    <button class="btn danger" type="submit">Закрыть кампанию</button>
+                {% else %}
+                    <input type="hidden" name="action" value="reopen">
+                    <button class="btn primary" type="submit">Переоткрыть</button>
+                {% endif %}
+            </form>
+        </div>
+    {% endif %}
 </section>
 
 <section class="detail-grid">
@@ -26,17 +40,34 @@
         </dl>
     </div>
     {% if perms.hr.add_campaignrecord %}
-        <form class="panel form-panel compact-form" method="post" action="{% url 'campaign_record_add' campaign.pk %}">
-            {% csrf_token %}
-            <div class="panel-header"><h2>Добавить запись</h2></div>
-            {% for field in form %}
+        <div class="panel form-panel compact-form">
+            <form class="form-panel" method="post" action="{% url 'campaign_record_add' campaign.pk %}">
+                {% csrf_token %}
+                <div class="panel-header"><h2>Добавить запись</h2></div>
+                {% for field in form %}
+                    <label>
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                    </label>
+                {% endfor %}
+                <button class="btn primary" type="submit">Добавить запись</button>
+            </form>
+            <hr class="panel-divider">
+            <form class="form-panel" method="post" action="{% url 'campaign_records_bulk_add' campaign.pk %}">
+                {% csrf_token %}
+                <div class="panel-header"><h2>Массовое добавление</h2></div>
                 <label>
-                    <span>{{ field.label }}</span>
-                    {{ field }}
+                    <span>Подразделение</span>
+                    <select class="form-control" name="department">
+                        <option value="">Все доступные сотрудники</option>
+                        {% for department in departments %}
+                            <option value="{{ department.pk }}">{{ department.name }}</option>
+                        {% endfor %}
+                    </select>
                 </label>
-            {% endfor %}
-            <button class="btn primary" type="submit">Добавить запись</button>
-        </form>
+                <button class="btn secondary" type="submit">Добавить выборку</button>
+            </form>
+        </div>
     {% endif %}
 </section>
 
@@ -45,7 +76,7 @@
     <div class="table-wrap">
         <table>
             <thead>
-                <tr><th>Сотрудник</th><th>Подразделение</th><th>Должность</th><th>Статус</th><th>Значение</th><th>Комментарий</th></tr>
+                <tr><th>Сотрудник</th><th>Подразделение</th><th>Должность</th><th>Статус</th><th>Значение</th><th>Комментарий</th><th>Workflow</th></tr>
             </thead>
             <tbody>
                 {% for record in records %}
@@ -56,9 +87,24 @@
                         <td>{{ record.get_status_display }}</td>
                         <td>{{ record.value|default:"-" }}</td>
                         <td>{{ record.comment|default:"-" }}</td>
+                        <td>
+                            {% if perms.hr.change_campaignrecord %}
+                                <form class="inline-status-form" method="post" action="{% url 'campaign_record_status_update' campaign.pk record.pk %}">
+                                    {% csrf_token %}
+                                    <select class="form-control" name="status">
+                                        {% for value, label in record_status_choices %}
+                                            <option value="{{ value }}" {% if record.status == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button class="btn secondary small-btn" type="submit">OK</button>
+                                </form>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="6" class="empty">Записей пока нет.</td></tr>
+                    <tr><td colspan="7" class="empty">Записей пока нет.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

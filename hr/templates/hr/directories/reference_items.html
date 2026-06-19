@@ -1,0 +1,45 @@
+{% extends "hr/base.html" %}
+
+{% block title %}{{ title }} - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Directory</p>
+        <h1>{{ title }}</h1>
+        <p class="page-description">{{ description }}</p>
+    </div>
+    {% if perms.hr.add_referenceitem %}<a class="btn primary" href="{% url 'reference_item_create' slug %}">Добавить</a>{% endif %}
+</section>
+
+<section class="panel">
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Код</th><th>Название</th><th>Описание</th><th>Активен</th><th>Действия</th></tr></thead>
+            <tbody>
+                {% for item in items %}
+                    <tr>
+                        <td>{{ item.code }}</td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.description|default:"-" }}</td>
+                        <td>{% if item.is_active %}<span class="badge badge-green">да</span>{% else %}<span class="badge badge-gray">нет</span>{% endif %}</td>
+                        <td>
+                            <div class="inline-actions">
+                                {% if perms.hr.change_referenceitem %}<a href="{% url 'reference_item_edit' slug item.pk %}">Редактировать</a>{% endif %}
+                                {% if perms.hr.delete_referenceitem %}
+                                    <form method="post" action="{% url 'reference_item_delete' slug item.pk %}">
+                                        {% csrf_token %}
+                                        <button class="link-button danger-link" type="submit">Удалить</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5" class="empty">Записей пока нет.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

@@ -15,24 +15,39 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .audit import snapshot_instance, write_audit_log
+from .access import scoped_employee_queryset, user_can_access_employee
+from .audit import audit_logs_with_diffs, snapshot_instance, write_audit_log
 from .columns import (
     EMPLOYEE_COLUMNS,
     PAGE_SIZE_CHOICES,
     get_employee_column_preference,
     save_employee_column_preference,
 )
-from .excel import build_employee_workbook, import_employees_from_xlsx
-from .forms import CampaignForm, CampaignRecordForm, DepartmentForm, EmployeeForm
+from .excel import (
+    apply_employee_import_rows,
+    build_employee_workbook,
+    preview_employees_from_xlsx,
+)
+from .forms import (
+    CampaignForm,
+    CampaignRecordForm,
+    DepartmentForm,
+    EmailTemplateForm,
+    EmployeeForm,
+    PositionForm,
+    ReferenceItemForm,
+)
 from .models import (
     AuditLog,
     Campaign,
     CampaignRecord,
     Contract,
     Department,
+    EmailTemplate,
     Employee,
     Position,
     Probation,
+    ReferenceItem,
 )
 
 
@@ -96,6 +111,24 @@ SIMPLE_PAGES = {
     },
 }
 
+REFERENCE_DIRECTORY_CONFIG = {
+    "contract-types": {
+        "category": ReferenceItem.CATEGORY_CONTRACT_TYPE,
+        "title": "Типы договоров",
+        "description": "Справочник типов договоров для HR-операций.",
+    },
+    "dismissal-reasons": {
+        "category": ReferenceItem.CATEGORY_DISMISSAL_REASON,
+        "title": "Причины увольнения",
+        "description": "Справочник причин увольнения для карточек сотрудников.",
+    },
+    "calendar-event-types": {
+        "category": ReferenceItem.CATEGORY_CALENDAR_EVENT_TYPE,
+        "title": "Типы событий календаря",
+        "description": "Справочник типов событий для будущего расширения календаря.",
+    },
+}
+
 
 def _querystring_without(request, *excluded_keys):
     params = request.GET.copy()
@@ -104,15 +137,28 @@ def _querystring_without(request, *excluded_keys):
     return params.urlencode()
 
 
+def _employee_queryset(request):
+    return scoped_employee_queryset(
+        request.user,
+        Employee.objects.select_related("department", "position", "manager", "dismissal_reason"),
+    )
+
+
 @login_required
 @permission_required("hr.view_employee", raise_exception=True)
 def dashboard(request):
     today = timezone.localdate()
     soon = today + timedelta(days=30)
+    visible_employee_ids = _employee_queryset(request).values("id")
 
     expiring_contracts = (
         Contract.objects.select_related("employee")
-        .filter(employee__is_active=True, end_date__gte=today, end_date__lte=soon)
+        .filter(
+            employee_id__in=visible_employee_ids,
+            employee__is_active=True,
+            end_date__gte=today,
+            end_date__lte=soon,
+        )
         .order_by("end_date")[:10]
     )
     contract_rows = [
@@ -126,17 +172,17 @@ def dashboard(request):
     stats = [
         {
             "label": "Активные сотрудники",
-            "value": Employee.objects.filter(is_active=True).count(),
+            "value": _employee_queryset(request).filter(is_active=True).count(),
             "accent": "blue",
         },
         {
             "label": "Устаревшие ИПР",
-            "value": Employee.objects.filter(ipr_status=Employee.IPR_EXPIRED).count(),
+            "value": _employee_queryset(request).filter(ipr_status=Employee.IPR_EXPIRED).count(),
             "accent": "red",
         },
         {
             "label": "ИПР истекает за 30 дней",
-            "value": Employee.objects.filter(ipr_status=Employee.IPR_EXPIRING).count(),
+            "value": _employee_queryset(request).filter(ipr_status=Employee.IPR_EXPIRING).count(),
             "accent": "amber",
         },
         {
@@ -168,7 +214,7 @@ def dashboard(request):
 
 
 def _filtered_employees(request):
-    employees = Employee.objects.select_related("department", "position", "manager")
+    employees = _employee_queryset(request)
 
     if request.GET.get("show_inactive") != "1":
         employees = employees.filter(is_active=True)
@@ -257,21 +303,27 @@ def employees_list(request):
 @permission_required("hr.view_employee", raise_exception=True)
 def employee_detail(request, pk):
     employee = get_object_or_404(
-        Employee.objects.select_related("department", "position", "manager").prefetch_related(
+        _employee_queryset(request).prefetch_related(
             "contracts",
             "campaign_records__campaign",
             "change_logs",
         ),
         pk=pk,
     )
+    audit_logs = AuditLog.objects.filter(
+        model_name="Employee",
+        object_id=str(employee.pk),
+    ).select_related("actor")[:20]
     return render(
         request,
         "hr/employees/detail.html",
         {
             "employee": employee,
             "contracts": employee.contracts.all(),
+            "probation": getattr(employee, "probation", None),
             "campaign_records": employee.campaign_records.select_related("campaign").all(),
             "changes": employee.change_logs.all()[:12],
+            "audit_entries": audit_logs_with_diffs(audit_logs),
         },
     )
 
@@ -306,7 +358,7 @@ def employee_create(request):
 @login_required
 @permission_required("hr.change_employee", raise_exception=True)
 def employee_edit(request, pk):
-    employee = get_object_or_404(Employee, pk=pk)
+    employee = get_object_or_404(_employee_queryset(request), pk=pk)
     before = snapshot_instance(employee)
     if request.method == "POST":
         form = EmployeeForm(request.POST, instance=employee)
@@ -337,7 +389,7 @@ def employee_edit(request, pk):
 @permission_required("hr.change_employee", raise_exception=True)
 @require_POST
 def employee_terminate(request, pk):
-    employee = get_object_or_404(Employee, pk=pk)
+    employee = get_object_or_404(_employee_queryset(request), pk=pk)
     before = snapshot_instance(employee)
     employee.is_active = False
     employee.dismissal_date = timezone.localdate()
@@ -359,7 +411,7 @@ def employee_terminate(request, pk):
 @permission_required("hr.change_employee", raise_exception=True)
 @require_POST
 def employee_restore(request, pk):
-    employee = get_object_or_404(Employee, pk=pk)
+    employee = get_object_or_404(_employee_queryset(request), pk=pk)
     before = snapshot_instance(employee)
     employee.is_active = True
     employee.dismissal_date = None
@@ -402,42 +454,60 @@ def employees_export(request):
 @permission_required(("hr.add_employee", "hr.change_employee"), raise_exception=True)
 def employees_import(request):
     result = None
+    preview = request.session.get("employee_import_preview")
     if request.method == "POST":
-        upload = request.FILES.get("file")
-        if not upload:
-            messages.error(request, "Выберите файл .xlsx для импорта.")
-        elif not upload.name.lower().endswith(".xlsx"):
-            messages.error(request, "Поддерживается только формат .xlsx.")
-        else:
-            try:
-                result = import_employees_from_xlsx(upload)
-            except Exception as exc:
-                result = {
-                    "created": 0,
-                    "updated": 0,
-                    "skipped": 0,
-                    "errors": [f"Файл не удалось прочитать: {exc}"],
-                }
+        action = request.POST.get("action", "preview")
+        if action == "confirm":
+            rows = request.session.get("employee_import_rows", [])
+            result = apply_employee_import_rows(rows)
+            request.session.pop("employee_import_rows", None)
+            request.session.pop("employee_import_preview", None)
+            preview = None
             if result["errors"]:
-                messages.warning(
-                    request,
-                    "Импорт завершён с ошибками. Проверьте отчёт ниже.",
-                )
+                messages.warning(request, "Импорт применён с ошибками.")
             else:
-                messages.success(request, "Импорт сотрудников выполнен.")
+                messages.success(request, "Импорт сотрудников применён.")
             write_audit_log(
                 request,
                 AuditLog.ACTION_IMPORT,
                 (
-                    "Импорт сотрудников: "
+                    "Импорт сотрудников подтверждён: "
                     f"{result['created']} создано, {result['updated']} обновлено, "
                     f"{len(result['errors'])} ошибок"
                 ),
                 after=result,
                 write_change=False,
             )
+        else:
+            upload = request.FILES.get("file")
+            if not upload:
+                messages.error(request, "Выберите файл .xlsx для предпросмотра.")
+            elif not upload.name.lower().endswith(".xlsx"):
+                messages.error(request, "Поддерживается только формат .xlsx.")
+            else:
+                try:
+                    preview = preview_employees_from_xlsx(upload)
+                except Exception as exc:
+                    preview = {
+                        "created": 0,
+                        "updated": 0,
+                        "skipped": 0,
+                        "errors": [f"Файл не удалось прочитать: {exc}"],
+                        "operations": [],
+                        "rows": [],
+                    }
+                request.session["employee_import_preview"] = preview
+                request.session["employee_import_rows"] = preview.get("rows", [])
+                if preview["errors"]:
+                    messages.warning(request, "Предпросмотр построен с ошибками.")
+                else:
+                    messages.success(request, "Предпросмотр готов. Проверьте изменения и подтвердите импорт.")
 
-    return render(request, "hr/employees/import.html", {"result": result})
+    return render(
+        request,
+        "hr/employees/import.html",
+        {"result": result, "preview": preview},
+    )
 
 
 @login_required
@@ -485,11 +555,12 @@ def _probation_stage_status(done, due_date, today):
 @permission_required("hr.view_probation", raise_exception=True)
 def probation_list(request):
     today = timezone.localdate()
+    visible_employee_ids = _employee_queryset(request).values("id")
     probations = Probation.objects.select_related(
         "employee",
         "employee__department",
         "employee__position",
-    ).order_by("end_date")
+    ).filter(employee_id__in=visible_employee_ids).order_by("end_date")
 
     rows = []
     for probation in probations:
@@ -745,9 +816,10 @@ def calendar_view(request):
     ]
     month_start, month_end = _month_bounds(year, month)
     events = defaultdict(list)
+    visible_employees = _employee_queryset(request)
 
     if "hire" in selected_types:
-        employees = Employee.objects.filter(
+        employees = visible_employees.filter(
             hire_date__gte=month_start,
             hire_date__lte=month_end,
         )
@@ -761,7 +833,7 @@ def calendar_view(request):
             )
 
     if "dismissal" in selected_types:
-        employees = Employee.objects.filter(
+        employees = visible_employees.filter(
             dismissal_date__gte=month_start,
             dismissal_date__lte=month_end,
         )
@@ -776,6 +848,7 @@ def calendar_view(request):
 
     if "probation" in selected_types:
         probations = Probation.objects.select_related("employee").filter(
+            employee_id__in=visible_employees.values("id"),
             end_date__gte=month_start,
             end_date__lte=month_end,
         )
@@ -789,7 +862,7 @@ def calendar_view(request):
             )
 
     if "ipr" in selected_types:
-        employees = Employee.objects.filter(
+        employees = visible_employees.filter(
             ipr_status__in=[Employee.IPR_EXPIRED, Employee.IPR_EXPIRING],
             contract_end_date__gte=month_start,
             contract_end_date__lte=month_end,
@@ -914,7 +987,12 @@ def campaign_create(request):
 @permission_required("hr.view_campaign", raise_exception=True)
 def campaign_detail(request, pk):
     campaign = get_object_or_404(Campaign.objects.annotate(record_count=Count("records")), pk=pk)
-    records = campaign.records.select_related("employee", "employee__department", "employee__position")
+    visible_employee_ids = _employee_queryset(request).values("id")
+    records = campaign.records.select_related(
+        "employee",
+        "employee__department",
+        "employee__position",
+    ).filter(employee_id__in=visible_employee_ids)
     form = CampaignRecordForm()
     return render(
         request,
@@ -923,6 +1001,8 @@ def campaign_detail(request, pk):
             "campaign": campaign,
             "records": records,
             "form": form,
+            "departments": Department.objects.order_by("name"),
+            "record_status_choices": CampaignRecord.STATUS_CHOICES,
         },
     )
 
@@ -935,6 +1015,8 @@ def campaign_record_add(request, pk):
     form = CampaignRecordForm(request.POST)
     if form.is_valid():
         record = form.save(commit=False)
+        if not user_can_access_employee(request.user, record.employee):
+            raise PermissionDenied
         record.campaign = campaign
         record.save()
         write_audit_log(
@@ -949,6 +1031,290 @@ def campaign_record_add(request, pk):
     else:
         messages.error(request, "Запись не сохранена. Проверьте поля формы.")
     return redirect("campaign_detail", pk=campaign.pk)
+
+
+@login_required
+@permission_required("hr.add_campaignrecord", raise_exception=True)
+@require_POST
+def campaign_records_bulk_add(request, pk):
+    campaign = get_object_or_404(Campaign, pk=pk)
+    employees = _employee_queryset(request).filter(is_active=True)
+    department_id = request.POST.get("department")
+    if department_id:
+        employees = employees.filter(department_id=department_id)
+
+    existing_ids = set(campaign.records.values_list("employee_id", flat=True))
+    created = 0
+    for employee in employees.exclude(id__in=existing_ids):
+        CampaignRecord.objects.create(
+            campaign=campaign,
+            employee=employee,
+            status=CampaignRecord.STATUS_MANAGER_REVIEW,
+        )
+        created += 1
+
+    write_audit_log(
+        request,
+        AuditLog.ACTION_CREATE,
+        f"Массово добавлены записи кампании {campaign}: {created}",
+        obj=campaign,
+        after={"created_records": created, "department_id": department_id or ""},
+        write_change=False,
+    )
+    messages.success(request, f"Добавлено записей: {created}.")
+    return redirect("campaign_detail", pk=campaign.pk)
+
+
+@login_required
+@permission_required("hr.change_campaignrecord", raise_exception=True)
+@require_POST
+def campaign_record_status_update(request, pk, record_pk):
+    campaign = get_object_or_404(Campaign, pk=pk)
+    record = get_object_or_404(campaign.records.select_related("employee"), pk=record_pk)
+    if not user_can_access_employee(request.user, record.employee):
+        raise PermissionDenied
+    status = request.POST.get("status")
+    if status not in dict(CampaignRecord.STATUS_CHOICES):
+        messages.error(request, "Некорректный статус записи кампании.")
+        return redirect("campaign_detail", pk=campaign.pk)
+
+    before = snapshot_instance(record)
+    record.status = status
+    record.save(update_fields=["status"])
+    write_audit_log(
+        request,
+        AuditLog.ACTION_UPDATE,
+        f"Статус записи кампании изменён: {record.get_status_display()}",
+        obj=record,
+        before=before,
+        after=snapshot_instance(record),
+        employee=record.employee,
+    )
+    messages.success(request, "Статус записи кампании обновлён.")
+    return redirect("campaign_detail", pk=campaign.pk)
+
+
+@login_required
+@permission_required("hr.change_campaign", raise_exception=True)
+@require_POST
+def campaign_status_update(request, pk):
+    campaign = get_object_or_404(Campaign, pk=pk)
+    before = snapshot_instance(campaign)
+    action = request.POST.get("action")
+    if action == "close":
+        campaign.status = Campaign.STATUS_CLOSED
+        campaign.closed_at = timezone.localdate()
+        event = "Кампания закрыта"
+    elif action == "reopen":
+        campaign.status = Campaign.STATUS_OPEN
+        campaign.closed_at = None
+        event = "Кампания переоткрыта"
+    else:
+        messages.error(request, "Неизвестное действие кампании.")
+        return redirect("campaign_detail", pk=campaign.pk)
+    campaign.save(update_fields=["status", "closed_at"])
+    write_audit_log(
+        request,
+        AuditLog.ACTION_UPDATE,
+        event,
+        obj=campaign,
+        before=before,
+        after=snapshot_instance(campaign),
+        write_change=False,
+    )
+    messages.success(request, event)
+    return redirect("campaign_detail", pk=campaign.pk)
+
+
+@login_required
+@permission_required("hr.view_position", raise_exception=True)
+def positions_directory(request):
+    positions = Position.objects.annotate(employee_count=Count("employees")).order_by("name")
+    return render(
+        request,
+        "hr/directories/positions.html",
+        {"positions": positions},
+    )
+
+
+@login_required
+@permission_required("hr.add_position", raise_exception=True)
+def position_create(request):
+    if request.method == "POST":
+        form = PositionForm(request.POST)
+        if form.is_valid():
+            position = form.save()
+            write_audit_log(
+                request,
+                AuditLog.ACTION_CREATE,
+                "Создана должность",
+                obj=position,
+                after=snapshot_instance(position),
+                write_change=False,
+            )
+            messages.success(request, "Должность создана.")
+            return redirect("positions")
+    else:
+        form = PositionForm()
+    return render(request, "hr/directories/form.html", {"form": form, "title": "Создание должности", "back_url": reverse("positions")})
+
+
+@login_required
+@permission_required("hr.change_position", raise_exception=True)
+def position_edit(request, pk):
+    position = get_object_or_404(Position, pk=pk)
+    before = snapshot_instance(position)
+    if request.method == "POST":
+        form = PositionForm(request.POST, instance=position)
+        if form.is_valid():
+            position = form.save()
+            write_audit_log(
+                request,
+                AuditLog.ACTION_UPDATE,
+                "Обновлена должность",
+                obj=position,
+                before=before,
+                after=snapshot_instance(position),
+                write_change=False,
+            )
+            messages.success(request, "Должность обновлена.")
+            return redirect("positions")
+    else:
+        form = PositionForm(instance=position)
+    return render(request, "hr/directories/form.html", {"form": form, "title": "Редактирование должности", "back_url": reverse("positions")})
+
+
+@login_required
+@permission_required("hr.delete_position", raise_exception=True)
+@require_POST
+def position_delete(request, pk):
+    position = get_object_or_404(Position, pk=pk)
+    before = snapshot_instance(position)
+    name = position.name
+    position.delete()
+    write_audit_log(request, AuditLog.ACTION_DELETE, f"Удалена должность: {name}", before=before, write_change=False)
+    messages.warning(request, "Должность удалена.")
+    return redirect("positions")
+
+
+@login_required
+def reference_directory(request, slug):
+    config = _reference_config_or_404(slug)
+    if not request.user.has_perm("hr.view_referenceitem"):
+        raise PermissionDenied
+    items = ReferenceItem.objects.filter(category=config["category"]).order_by("name")
+    return render(
+        request,
+        "hr/directories/reference_items.html",
+        {"items": items, "slug": slug, **config},
+    )
+
+
+@login_required
+@permission_required("hr.add_referenceitem", raise_exception=True)
+def reference_item_create(request, slug):
+    config = _reference_config_or_404(slug)
+    if request.method == "POST":
+        form = ReferenceItemForm(request.POST, category=config["category"])
+        if form.is_valid():
+            item = form.save()
+            write_audit_log(request, AuditLog.ACTION_CREATE, "Создан элемент справочника", obj=item, after=snapshot_instance(item), write_change=False)
+            messages.success(request, "Элемент справочника создан.")
+            return redirect("reference_directory", slug=slug)
+    else:
+        form = ReferenceItemForm(category=config["category"])
+    return render(request, "hr/directories/form.html", {"form": form, "title": f"Создание: {config['title']}", "back_url": reverse("reference_directory", args=[slug])})
+
+
+@login_required
+@permission_required("hr.change_referenceitem", raise_exception=True)
+def reference_item_edit(request, slug, pk):
+    config = _reference_config_or_404(slug)
+    item = get_object_or_404(ReferenceItem, pk=pk, category=config["category"])
+    before = snapshot_instance(item)
+    if request.method == "POST":
+        form = ReferenceItemForm(request.POST, instance=item, category=config["category"])
+        if form.is_valid():
+            item = form.save()
+            write_audit_log(request, AuditLog.ACTION_UPDATE, "Обновлён элемент справочника", obj=item, before=before, after=snapshot_instance(item), write_change=False)
+            messages.success(request, "Элемент справочника обновлён.")
+            return redirect("reference_directory", slug=slug)
+    else:
+        form = ReferenceItemForm(instance=item, category=config["category"])
+    return render(request, "hr/directories/form.html", {"form": form, "title": f"Редактирование: {config['title']}", "back_url": reverse("reference_directory", args=[slug])})
+
+
+@login_required
+@permission_required("hr.delete_referenceitem", raise_exception=True)
+@require_POST
+def reference_item_delete(request, slug, pk):
+    config = _reference_config_or_404(slug)
+    item = get_object_or_404(ReferenceItem, pk=pk, category=config["category"])
+    before = snapshot_instance(item)
+    name = item.name
+    item.delete()
+    write_audit_log(request, AuditLog.ACTION_DELETE, f"Удалён элемент справочника: {name}", before=before, write_change=False)
+    messages.warning(request, "Элемент справочника удалён.")
+    return redirect("reference_directory", slug=slug)
+
+
+@login_required
+@permission_required("hr.view_emailtemplate", raise_exception=True)
+def email_templates_directory(request):
+    templates = EmailTemplate.objects.order_by("name")
+    return render(request, "hr/directories/email_templates.html", {"templates": templates})
+
+
+@login_required
+@permission_required("hr.add_emailtemplate", raise_exception=True)
+def email_template_create(request):
+    if request.method == "POST":
+        form = EmailTemplateForm(request.POST)
+        if form.is_valid():
+            template = form.save()
+            write_audit_log(request, AuditLog.ACTION_CREATE, "Создан шаблон письма", obj=template, after=snapshot_instance(template), write_change=False)
+            messages.success(request, "Шаблон письма создан.")
+            return redirect("mail_templates")
+    else:
+        form = EmailTemplateForm()
+    return render(request, "hr/directories/form.html", {"form": form, "title": "Создание шаблона письма", "back_url": reverse("mail_templates")})
+
+
+@login_required
+@permission_required("hr.change_emailtemplate", raise_exception=True)
+def email_template_edit(request, pk):
+    template = get_object_or_404(EmailTemplate, pk=pk)
+    before = snapshot_instance(template)
+    if request.method == "POST":
+        form = EmailTemplateForm(request.POST, instance=template)
+        if form.is_valid():
+            template = form.save()
+            write_audit_log(request, AuditLog.ACTION_UPDATE, "Обновлён шаблон письма", obj=template, before=before, after=snapshot_instance(template), write_change=False)
+            messages.success(request, "Шаблон письма обновлён.")
+            return redirect("mail_templates")
+    else:
+        form = EmailTemplateForm(instance=template)
+    return render(request, "hr/directories/form.html", {"form": form, "title": "Редактирование шаблона письма", "back_url": reverse("mail_templates")})
+
+
+@login_required
+@permission_required("hr.delete_emailtemplate", raise_exception=True)
+@require_POST
+def email_template_delete(request, pk):
+    template = get_object_or_404(EmailTemplate, pk=pk)
+    before = snapshot_instance(template)
+    name = template.name
+    template.delete()
+    write_audit_log(request, AuditLog.ACTION_DELETE, f"Удалён шаблон письма: {name}", before=before, write_change=False)
+    messages.warning(request, "Шаблон письма удалён.")
+    return redirect("mail_templates")
+
+
+def _reference_config_or_404(slug):
+    config = REFERENCE_DIRECTORY_CONFIG.get(slug)
+    if not config:
+        raise PermissionDenied
+    return config
 
 
 @login_required

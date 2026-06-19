@@ -1,12 +1,21 @@
 from io import BytesIO
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from openpyxl import Workbook, load_workbook
 
-from .models import AuditLog, Department, Employee, EmployeeColumnPreference, Position
+from .models import (
+    AuditLog,
+    Campaign,
+    CampaignRecord,
+    Department,
+    Employee,
+    EmployeeColumnPreference,
+    Position,
+    UserDepartmentAccess,
+)
 
 
 def make_user(username, hr_perms=(), auth_perms=()):
@@ -68,6 +77,19 @@ class HrFeatureTests(TestCase):
                 "add_employee",
                 "change_employee",
                 "view_employeecolumnpreference",
+            ],
+        )
+        cls.directory_admin = make_user(
+            "directory_admin",
+            hr_perms=[
+                "view_position",
+                "add_position",
+                "change_position",
+                "delete_position",
+                "view_campaign",
+                "view_employee",
+                "add_campaignrecord",
+                "change_campaignrecord",
             ],
         )
 
@@ -158,6 +180,9 @@ class HrFeatureTests(TestCase):
         response = self.client.post("/employees/import/", {"file": upload})
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["preview"]["created"], 1)
+        response = self.client.post("/employees/import/", {"action": "confirm"})
+        self.assertEqual(response.status_code, 200)
         employee = Employee.objects.get(email="imported@example.test")
         self.assertEqual(employee.department.name, "Import Department")
         self.assertEqual(employee.position.name, "Import Position")
@@ -193,6 +218,62 @@ class HrFeatureTests(TestCase):
         self.assertEqual(log.actor, self.manager)
         self.assertEqual(log.before["first_name"], "Иван")
         self.assertEqual(log.after["first_name"], "Пётр")
+
+    def test_hrbp_scope_is_limited_to_assigned_department(self):
+        group = Group.objects.create(name="HRBP")
+        hrbp = make_user("hrbp", hr_perms=["view_employee"])
+        hrbp.groups.add(group)
+        UserDepartmentAccess.objects.create(user=hrbp, department=self.department, include_children=True)
+        other_department = Department.objects.create(name="Sales")
+        Employee.objects.create(
+            first_name="Outside",
+            last_name="Scope",
+            email="outside@example.test",
+            department=other_department,
+            is_active=True,
+            ipr_status=Employee.IPR_NONE,
+            currency="RUB",
+        )
+
+        self.client.force_login(hrbp)
+        response = self.client.get("/employees/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["summary"]["count"], 1)
+
+    def test_position_directory_create_and_delete(self):
+        self.client.force_login(self.directory_admin)
+
+        response = self.client.post("/positions/new/", {"name": "Temporary Role"})
+        self.assertEqual(response.status_code, 302)
+        position = Position.objects.get(name="Temporary Role")
+
+        response = self.client.post(f"/positions/{position.pk}/delete/")
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Position.objects.filter(pk=position.pk).exists())
+
+    def test_campaign_record_workflow_status_update(self):
+        self.client.force_login(self.directory_admin)
+        campaign = Campaign.objects.create(
+            season="Тест",
+            year=2026,
+            status=Campaign.STATUS_OPEN,
+            start_date="2026-06-01",
+        )
+        record = CampaignRecord.objects.create(
+            campaign=campaign,
+            employee=self.employee,
+            status=CampaignRecord.STATUS_ACTIVE,
+        )
+
+        response = self.client.post(
+            f"/campaigns/{campaign.pk}/records/{record.pk}/status/",
+            {"status": CampaignRecord.STATUS_HR_APPROVED},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        self.assertEqual(record.status, CampaignRecord.STATUS_HR_APPROVED)
 
     def _build_import_file(self, rows):
         workbook = Workbook()

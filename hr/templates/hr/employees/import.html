@@ -7,7 +7,7 @@
     <div>
         <p class="eyebrow">Employees</p>
         <h1>Импорт сотрудников из Excel</h1>
-        <p class="page-description">Импорт создаёт новых сотрудников или обновляет существующих по ID, затем по email. Подразделения и должности создаются автоматически.</p>
+        <p class="page-description">Импорт сначала строит предпросмотр: какие сотрудники будут созданы, обновлены и какие поля изменятся. Сохранение произойдёт только после подтверждения.</p>
     </div>
     <div class="header-actions">
         <a class="btn secondary" href="{% url 'employees_import_template' %}">Скачать шаблон</a>
@@ -17,14 +17,69 @@
 
 <form class="panel form-panel narrow-form" method="post" enctype="multipart/form-data">
     {% csrf_token %}
+    <input type="hidden" name="action" value="preview">
     <label>
         <span>Файл .xlsx</span>
         <input class="form-control" type="file" name="file" accept=".xlsx" required>
     </label>
     <div class="form-actions">
-        <button class="btn primary" type="submit">Импортировать</button>
+        <button class="btn primary" type="submit">Построить предпросмотр</button>
     </div>
 </form>
+
+{% if preview %}
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Предпросмотр импорта</h2>
+            {% if not preview.errors and preview.operations %}
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="confirm">
+                    <button class="btn primary" type="submit">Подтвердить импорт</button>
+                </form>
+            {% endif %}
+        </div>
+        <div class="stats-grid compact-stats">
+            <article class="stat-card accent-green"><span>Будет создано</span><strong>{{ preview.created }}</strong></article>
+            <article class="stat-card accent-blue"><span>Будет обновлено</span><strong>{{ preview.updated }}</strong></article>
+            <article class="stat-card accent-amber"><span>Пустые строки</span><strong>{{ preview.skipped }}</strong></article>
+            <article class="stat-card accent-red"><span>Ошибки</span><strong>{{ preview.errors|length }}</strong></article>
+        </div>
+        {% if preview.errors %}
+            <div class="import-errors">
+                {% for error in preview.errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Строка</th><th>Действие</th><th>Сотрудник</th><th>Email</th><th>Изменения</th></tr></thead>
+                <tbody>
+                    {% for operation in preview.operations %}
+                        <tr>
+                            <td>{{ operation.row_number }}</td>
+                            <td>{% if operation.action == "create" %}<span class="badge badge-green">создание</span>{% else %}<span class="badge badge-blue">обновление</span>{% endif %}</td>
+                            <td>{{ operation.employee }}</td>
+                            <td>{{ operation.email|default:"-" }}</td>
+                            <td>
+                                <div class="diff-list">
+                                    {% for change in operation.changes|slice:":8" %}
+                                        <span>{{ change.field }}: {{ change.before }} -> {{ change.after }}</span>
+                                    {% empty %}
+                                        <span>Нет изменений</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="5" class="empty">Нет строк для импорта.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endif %}
 
 {% if result %}
     <section class="panel">
