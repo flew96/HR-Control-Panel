@@ -9,12 +9,40 @@
         <h1>Сотрудники</h1>
     </div>
     <div class="header-actions">
-        <button class="btn secondary" type="button">Колонки</button>
-        <button class="btn secondary" type="button">Экспорт</button>
-        <button class="btn secondary" type="button">Импорт</button>
-        <a class="btn primary" href="{% url 'employee_create' %}">Создать сотрудника</a>
+        <a class="btn secondary" href="{% url 'employees_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Экспорт Excel</a>
+        {% if perms.hr.add_employee and perms.hr.change_employee %}
+            <a class="btn secondary" href="{% url 'employees_import' %}">Импорт Excel</a>
+        {% endif %}
+        {% if perms.hr.add_employee %}
+            <a class="btn primary" href="{% url 'employee_create' %}">Создать сотрудника</a>
+        {% endif %}
     </div>
 </section>
+
+<details class="panel column-settings">
+    <summary>Колонки и пагинация</summary>
+    <form method="post" action="{% url 'employee_columns_update' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <div class="column-options">
+            {% for key, label in column_options %}
+                <label class="checkbox-row">
+                    <input type="checkbox" name="columns" value="{{ key }}" {% if key in visible_columns %}checked{% endif %}>
+                    <span>{% if label %}{{ label }}{% else %}Checkbox{% endif %}</span>
+                </label>
+            {% endfor %}
+            <label>
+                <span>Строк на странице</span>
+                <select class="form-control" name="page_size">
+                    {% for option in page_size_choices %}
+                        <option value="{{ option }}" {% if page_size == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button class="btn primary" type="submit">Сохранить вид</button>
+        </div>
+    </form>
+</details>
 
 <form class="filters" method="get">
     <label>
@@ -62,42 +90,65 @@
             <table>
                 <thead>
                     <tr>
-                        <th><input data-select-all="employee-row" type="checkbox"></th>
-                        <th>ФИО</th>
-                        <th>Подразделение</th>
-                        <th>Должность</th>
-                        <th>Руководитель</th>
-                        <th>Статус ИПР</th>
-                        <th>Тип договора</th>
-                        <th>Gross</th>
-                        <th>Net</th>
-                        <th>Валюта</th>
+                        {% if "select" in visible_columns %}<th><input data-select-all="employee-row" type="checkbox"></th>{% endif %}
+                        {% if "full_name" in visible_columns %}<th>ФИО</th>{% endif %}
+                        {% if "department" in visible_columns %}<th>Подразделение</th>{% endif %}
+                        {% if "position" in visible_columns %}<th>Должность</th>{% endif %}
+                        {% if "manager" in visible_columns %}<th>Руководитель</th>{% endif %}
+                        {% if "email" in visible_columns %}<th>Email</th>{% endif %}
+                        {% if "ipr_status" in visible_columns %}<th>Статус ИПР</th>{% endif %}
+                        {% if "contract_type" in visible_columns %}<th>Тип договора</th>{% endif %}
+                        {% if "hire_date" in visible_columns %}<th>Дата найма</th>{% endif %}
+                        {% if "contract_end_date" in visible_columns %}<th>Конец договора</th>{% endif %}
+                        {% if "salary_gross" in visible_columns %}<th>Gross</th>{% endif %}
+                        {% if "salary_net" in visible_columns %}<th>Net</th>{% endif %}
+                        {% if "currency" in visible_columns %}<th>Валюта</th>{% endif %}
+                        {% if "is_active" in visible_columns %}<th>Статус</th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
                     {% for employee in employees %}
                         <tr>
-                            <td><input data-checkbox-group="employee-row" type="checkbox"></td>
-                            <td>
-                                <a class="table-main-link" href="{% url 'employee_detail' employee.pk %}">{{ employee.full_name }}</a>
-                                {% if not employee.is_active %}<span class="badge badge-red">уволен</span>{% endif %}
-                                {% if not employee.email %}<span class="muted small">без email</span>{% endif %}
-                            </td>
-                            <td>{{ employee.department|default:"Без подразделения" }}</td>
-                            <td>{{ employee.position|default:"Без должности" }}</td>
-                            <td>{{ employee.manager.full_name|default:"-" }}</td>
-                            <td><span class="status status-{{ employee.ipr_status }}">{{ employee.get_ipr_status_display }}</span></td>
-                            <td>{{ employee.get_contract_type_display|default:"-" }}</td>
-                            <td>{{ employee.salary_gross|default:"-" }}</td>
-                            <td>{{ employee.salary_net|default:"-" }}</td>
-                            <td>{{ employee.currency }}</td>
+                            {% if "select" in visible_columns %}<td><input data-checkbox-group="employee-row" type="checkbox"></td>{% endif %}
+                            {% if "full_name" in visible_columns %}
+                                <td>
+                                    <a class="table-main-link" href="{% url 'employee_detail' employee.pk %}">{{ employee.full_name }}</a>
+                                    {% if not employee.is_active %}<span class="badge badge-red">уволен</span>{% endif %}
+                                    {% if not employee.email %}<span class="muted small">без email</span>{% endif %}
+                                </td>
+                            {% endif %}
+                            {% if "department" in visible_columns %}<td>{{ employee.department|default:"Без подразделения" }}</td>{% endif %}
+                            {% if "position" in visible_columns %}<td>{{ employee.position|default:"Без должности" }}</td>{% endif %}
+                            {% if "manager" in visible_columns %}<td>{{ employee.manager.full_name|default:"-" }}</td>{% endif %}
+                            {% if "email" in visible_columns %}<td>{{ employee.email|default:"-" }}</td>{% endif %}
+                            {% if "ipr_status" in visible_columns %}<td><span class="status status-{{ employee.ipr_status }}">{{ employee.get_ipr_status_display }}</span></td>{% endif %}
+                            {% if "contract_type" in visible_columns %}<td>{{ employee.get_contract_type_display|default:"-" }}</td>{% endif %}
+                            {% if "hire_date" in visible_columns %}<td>{{ employee.hire_date|date:"d.m.Y"|default:"-" }}</td>{% endif %}
+                            {% if "contract_end_date" in visible_columns %}<td>{{ employee.contract_end_date|date:"d.m.Y"|default:"-" }}</td>{% endif %}
+                            {% if "salary_gross" in visible_columns %}<td>{{ employee.salary_gross|default:"-" }}</td>{% endif %}
+                            {% if "salary_net" in visible_columns %}<td>{{ employee.salary_net|default:"-" }}</td>{% endif %}
+                            {% if "currency" in visible_columns %}<td>{{ employee.currency }}</td>{% endif %}
+                            {% if "is_active" in visible_columns %}
+                                <td>{% if employee.is_active %}<span class="badge badge-green">активен</span>{% else %}<span class="badge badge-red">уволен</span>{% endif %}</td>
+                            {% endif %}
                         </tr>
                     {% empty %}
-                        <tr><td colspan="10" class="empty">Сотрудники не найдены.</td></tr>
+                        <tr><td colspan="{{ visible_column_count }}" class="empty">Сотрудники не найдены.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        {% if page_obj.paginator.num_pages > 1 %}
+            <nav class="pagination">
+                {% if page_obj.has_previous %}
+                    <a class="btn secondary" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">Назад</a>
+                {% endif %}
+                <span>Страница {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span>
+                {% if page_obj.has_next %}
+                    <a class="btn secondary" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Вперёд</a>
+                {% endif %}
+            </nav>
+        {% endif %}
     </div>
 
     <aside class="panel summary-panel">
@@ -130,4 +181,3 @@
     </aside>
 </section>
 {% endblock %}
-

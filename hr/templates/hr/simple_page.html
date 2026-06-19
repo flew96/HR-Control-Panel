@@ -30,16 +30,47 @@
     <section class="panel">
         <div class="table-wrap">
             <table>
-                <thead><tr><th>Дата</th><th>Сотрудник</th><th>Событие</th></tr></thead>
+                <thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Событие</th><th>IP</th></tr></thead>
                 <tbody>
-                    {% for change in changes %}
+                    {% for log in audit_logs %}
                         <tr>
-                            <td>{{ change.created_at|date:"d.m.Y H:i" }}</td>
-                            <td>{{ change.employee.full_name|default:"Система" }}</td>
-                            <td>{{ change.event }}</td>
+                            <td>{{ log.created_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ log.actor.username|default:"Система" }}</td>
+                            <td>{{ log.get_action_display }}</td>
+                            <td>{{ log.model_name }}{% if log.object_id %} #{{ log.object_id }}{% endif %}</td>
+                            <td>{{ log.event }}</td>
+                            <td>{{ log.ip_address|default:"-" }}</td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="3" class="empty">Записей пока нет.</td></tr>
+                        <tr><td colspan="6" class="empty">Записей пока нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% elif page == "users" %}
+    <section class="panel">
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Логин</th><th>Имя</th><th>Email</th><th>Роли</th><th>Активен</th><th>Staff</th></tr></thead>
+                <tbody>
+                    {% for user in users %}
+                        <tr>
+                            <td>{{ user.username }}</td>
+                            <td>{{ user.get_full_name|default:"-" }}</td>
+                            <td>{{ user.email|default:"-" }}</td>
+                            <td>
+                                {% for group in user.groups.all %}
+                                    <span class="badge badge-blue">{{ group.name }}</span>
+                                {% empty %}
+                                    -
+                                {% endfor %}
+                            </td>
+                            <td>{% if user.is_active %}<span class="badge badge-green">да</span>{% else %}<span class="badge badge-red">нет</span>{% endif %}</td>
+                            <td>{% if user.is_staff %}да{% else %}нет{% endif %}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="6" class="empty">Пользователи не созданы.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

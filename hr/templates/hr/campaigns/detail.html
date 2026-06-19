@@ -25,17 +25,19 @@
             <dt>Записей</dt><dd>{{ campaign.record_count }}</dd>
         </dl>
     </div>
-    <form class="panel form-panel compact-form" method="post" action="{% url 'campaign_record_add' campaign.pk %}">
-        {% csrf_token %}
-        <div class="panel-header"><h2>Добавить запись</h2></div>
-        {% for field in form %}
-            <label>
-                <span>{{ field.label }}</span>
-                {{ field }}
-            </label>
-        {% endfor %}
-        <button class="btn primary" type="submit">Добавить запись</button>
-    </form>
+    {% if perms.hr.add_campaignrecord %}
+        <form class="panel form-panel compact-form" method="post" action="{% url 'campaign_record_add' campaign.pk %}">
+            {% csrf_token %}
+            <div class="panel-header"><h2>Добавить запись</h2></div>
+            {% for field in form %}
+                <label>
+                    <span>{{ field.label }}</span>
+                    {{ field }}
+                </label>
+            {% endfor %}
+            <button class="btn primary" type="submit">Добавить запись</button>
+        </form>
+    {% endif %}
 </section>
 
 <section class="panel">
@@ -63,4 +65,3 @@
     </div>
 </section>
 {% endblock %}
-

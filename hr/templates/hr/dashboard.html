@@ -55,9 +55,9 @@
             <h2>Быстрые действия</h2>
         </div>
         <div class="action-stack">
-            <a class="btn primary" href="{% url 'campaign_create' %}">Создать кампанию</a>
-            <button class="btn secondary" type="button">Импорт сотрудников</button>
-            <a class="btn secondary" href="{% url 'employee_create' %}">Добавить сотрудника</a>
+            {% if perms.hr.add_campaign %}<a class="btn primary" href="{% url 'campaign_create' %}">Создать кампанию</a>{% endif %}
+            {% if perms.hr.add_employee and perms.hr.change_employee %}<a class="btn secondary" href="{% url 'employees_import' %}">Импорт сотрудников</a>{% endif %}
+            {% if perms.hr.add_employee %}<a class="btn secondary" href="{% url 'employee_create' %}">Добавить сотрудника</a>{% endif %}
         </div>
     </aside>
 </section>
@@ -71,7 +71,7 @@
             <thead>
                 <tr>
                     <th>Дата</th>
-                    <th>Сотрудник</th>
+                    <th>Пользователь</th>
                     <th>Событие</th>
                 </tr>
             </thead>
@@ -79,13 +79,7 @@
                 {% for change in recent_changes %}
                     <tr>
                         <td>{{ change.created_at|date:"d.m.Y H:i" }}</td>
-                        <td>
-                            {% if change.employee %}
-                                <a href="{% url 'employee_detail' change.employee.pk %}">{{ change.employee.full_name }}</a>
-                            {% else %}
-                                Система
-                            {% endif %}
-                        </td>
+                        <td>{{ change.actor.username|default:"Система" }}</td>
                         <td>{{ change.event }}</td>
                     </tr>
                 {% empty %}
@@ -96,4 +90,3 @@
     </div>
 </section>
 {% endblock %}
-

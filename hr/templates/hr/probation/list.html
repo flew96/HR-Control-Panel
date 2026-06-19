@@ -26,11 +26,13 @@
                         <td>{{ probation.employee.hire_date|date:"d.m.Y"|default:"-" }}</td>
                         <td>{{ probation.end_date|date:"d.m.Y" }}</td>
                         <td>
-                            <form method="post" action="{% url 'employee_terminate' probation.employee.pk %}">
-                                {% csrf_token %}
-                                <input type="hidden" name="next" value="{% url 'probation_list' %}">
-                                <button class="btn danger small-btn" type="submit">Уволить</button>
-                            </form>
+                            {% if perms.hr.change_employee %}
+                                <form method="post" action="{% url 'employee_terminate' probation.employee.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="{% url 'probation_list' %}">
+                                    <button class="btn danger small-btn" type="submit">Уволить</button>
+                                </form>
+                            {% else %}-{% endif %}
                         </td>
                     </tr>
                 {% empty %}
@@ -77,28 +79,34 @@
                         </td>
                         {% for stage in row.stages %}
                             <td class="stage-cell stage-{{ stage.status }}">
-                                <form method="post" action="{% url 'probation_toggle_stage' row.probation.pk stage.field %}">
-                                    {% csrf_token %}
-                                    <button type="submit" title="{{ stage.title }}: {{ stage.due_date|date:'d.m.Y' }}">
-                                        {% if stage.done %}Пройден{% else %}Открыт{% endif %}
-                                    </button>
-                                </form>
+                                {% if perms.hr.change_probation %}
+                                    <form method="post" action="{% url 'probation_toggle_stage' row.probation.pk stage.field %}">
+                                        {% csrf_token %}
+                                        <button type="submit" title="{{ stage.title }}: {{ stage.due_date|date:'d.m.Y' }}">
+                                            {% if stage.done %}Пройден{% else %}Открыт{% endif %}
+                                        </button>
+                                    </form>
+                                {% else %}
+                                    <span class="stage-readonly">{% if stage.done %}Пройден{% else %}Открыт{% endif %}</span>
+                                {% endif %}
                             </td>
                         {% endfor %}
                         <td>{{ row.probation.comment|default:"-" }}</td>
                         <td>
-                            <div class="inline-actions">
-                                <form method="post" action="{% url 'probation_set_result' row.probation.pk %}">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="result" value="passed">
-                                    <button class="btn success small-btn" type="submit">Пройден</button>
-                                </form>
-                                <form method="post" action="{% url 'probation_set_result' row.probation.pk %}">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="result" value="failed">
-                                    <button class="btn danger small-btn" type="submit">Не пройден</button>
-                                </form>
-                            </div>
+                            {% if perms.hr.change_probation %}
+                                <div class="inline-actions">
+                                    <form method="post" action="{% url 'probation_set_result' row.probation.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="result" value="passed">
+                                        <button class="btn success small-btn" type="submit">Пройден</button>
+                                    </form>
+                                    <form method="post" action="{% url 'probation_set_result' row.probation.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="result" value="failed">
+                                        <button class="btn danger small-btn" type="submit">Не пройден</button>
+                                    </form>
+                                </div>
+                            {% else %}-{% endif %}
                         </td>
                     </tr>
                 {% empty %}
@@ -109,4 +117,3 @@
     </div>
 </section>
 {% endblock %}
-

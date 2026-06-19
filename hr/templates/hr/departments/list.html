@@ -10,7 +10,7 @@
     </div>
     <div class="header-actions">
         <a class="btn secondary" href="{% url 'departments_export' %}">Выгрузить структуру</a>
-        <a class="btn primary" href="{% url 'department_create' %}">Добавить подразделение</a>
+        {% if perms.hr.add_department %}<a class="btn primary" href="{% url 'department_create' %}">Добавить подразделение</a>{% endif %}
     </div>
 </section>
 
@@ -24,4 +24,3 @@
     </div>
 </section>
 {% endblock %}
-

@@ -1,9 +1,13 @@
 import csv
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from urllib.parse import urlencode
 
 from django.contrib import messages
+from django.contrib.auth import get_user_model
+from django.contrib.auth.decorators import login_required, permission_required
+from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db.models import Avg, Count, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -11,11 +15,19 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from .audit import snapshot_instance, write_audit_log
+from .columns import (
+    EMPLOYEE_COLUMNS,
+    PAGE_SIZE_CHOICES,
+    get_employee_column_preference,
+    save_employee_column_preference,
+)
+from .excel import build_employee_workbook, import_employees_from_xlsx
 from .forms import CampaignForm, CampaignRecordForm, DepartmentForm, EmployeeForm
 from .models import (
+    AuditLog,
     Campaign,
     CampaignRecord,
-    ChangeLog,
     Contract,
     Department,
     Employee,
@@ -72,27 +84,28 @@ SIMPLE_PAGES = {
     },
     "users": {
         "title": "Пользователи",
-        "description": "Заготовка под управление пользователями и ролями.",
+        "description": "Пользователи системы, группы и активность.",
     },
     "data_audit": {
         "title": "Аудит-лог данных",
-        "description": "Раздел для контроля изменений в критичных данных.",
+        "description": "Строгий журнал изменений с пользователем, объектом и снимками данных.",
     },
     "action_log": {
         "title": "Журнал действий",
-        "description": "Последние события и системные действия.",
+        "description": "Последние действия пользователей в системе.",
     },
 }
 
 
-def _add_change(employee, event):
-    ChangeLog.objects.create(
-        created_at=timezone.now(),
-        employee=employee,
-        event=event,
-    )
+def _querystring_without(request, *excluded_keys):
+    params = request.GET.copy()
+    for key in excluded_keys:
+        params.pop(key, None)
+    return params.urlencode()
 
 
+@login_required
+@permission_required("hr.view_employee", raise_exception=True)
 def dashboard(request):
     today = timezone.localdate()
     soon = today + timedelta(days=30)
@@ -141,7 +154,7 @@ def dashboard(request):
         },
     ]
 
-    recent_changes = ChangeLog.objects.select_related("employee").order_by("-created_at")[:8]
+    recent_changes = AuditLog.objects.select_related("actor").order_by("-created_at")[:8]
 
     return render(
         request,
@@ -184,15 +197,16 @@ def _filtered_employees(request):
     return employees.order_by("last_name", "first_name", "middle_name")
 
 
+@login_required
+@permission_required("hr.view_employee", raise_exception=True)
 def employees_list(request):
-    employees = _filtered_employees(request)
-    total_count = employees.count()
-    missing_salary_count = employees.filter(
+    filtered_employees = _filtered_employees(request)
+    total_count = filtered_employees.count()
+    missing_salary_count = filtered_employees.filter(
         Q(salary_gross__isnull=True) | Q(salary_net__isnull=True)
     ).count()
-
     payroll_by_currency = list(
-        employees.values("currency")
+        filtered_employees.values("currency")
         .annotate(
             employees_count=Count("id"),
             gross_total=Sum("salary_gross"),
@@ -203,14 +217,26 @@ def employees_list(request):
         .order_by("currency")
     )
 
+    visible_columns, page_size = get_employee_column_preference(request.user)
+    paginator = Paginator(filtered_employees, page_size)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
     return render(
         request,
         "hr/employees/list.html",
         {
-            "employees": employees,
+            "employees": page_obj.object_list,
+            "page_obj": page_obj,
+            "paginator": paginator,
             "departments": Department.objects.order_by("name"),
             "positions": Position.objects.order_by("name"),
             "ipr_status_choices": Employee.IPR_STATUS_CHOICES,
+            "column_options": EMPLOYEE_COLUMNS,
+            "visible_columns": visible_columns,
+            "visible_column_count": len(visible_columns),
+            "page_size": page_size,
+            "page_size_choices": PAGE_SIZE_CHOICES,
+            "query_string": _querystring_without(request, "page"),
             "payroll_by_currency": payroll_by_currency,
             "summary": {
                 "count": total_count,
@@ -227,6 +253,8 @@ def employees_list(request):
     )
 
 
+@login_required
+@permission_required("hr.view_employee", raise_exception=True)
 def employee_detail(request, pk):
     employee = get_object_or_404(
         Employee.objects.select_related("department", "position", "manager").prefetch_related(
@@ -248,12 +276,21 @@ def employee_detail(request, pk):
     )
 
 
+@login_required
+@permission_required("hr.add_employee", raise_exception=True)
 def employee_create(request):
     if request.method == "POST":
         form = EmployeeForm(request.POST)
         if form.is_valid():
             employee = form.save()
-            _add_change(employee, "Создана карточка сотрудника")
+            write_audit_log(
+                request,
+                AuditLog.ACTION_CREATE,
+                "Создана карточка сотрудника",
+                obj=employee,
+                after=snapshot_instance(employee),
+                employee=employee,
+            )
             messages.success(request, "Сотрудник создан.")
             return redirect("employee_detail", pk=employee.pk)
     else:
@@ -266,13 +303,24 @@ def employee_create(request):
     )
 
 
+@login_required
+@permission_required("hr.change_employee", raise_exception=True)
 def employee_edit(request, pk):
     employee = get_object_or_404(Employee, pk=pk)
+    before = snapshot_instance(employee)
     if request.method == "POST":
         form = EmployeeForm(request.POST, instance=employee)
         if form.is_valid():
             employee = form.save()
-            _add_change(employee, "Обновлена карточка сотрудника")
+            write_audit_log(
+                request,
+                AuditLog.ACTION_UPDATE,
+                "Обновлена карточка сотрудника",
+                obj=employee,
+                before=before,
+                after=snapshot_instance(employee),
+                employee=employee,
+            )
             messages.success(request, "Изменения сохранены.")
             return redirect("employee_detail", pk=employee.pk)
     else:
@@ -285,26 +333,136 @@ def employee_edit(request, pk):
     )
 
 
+@login_required
+@permission_required("hr.change_employee", raise_exception=True)
 @require_POST
 def employee_terminate(request, pk):
     employee = get_object_or_404(Employee, pk=pk)
+    before = snapshot_instance(employee)
     employee.is_active = False
     employee.dismissal_date = timezone.localdate()
     employee.save(update_fields=["is_active", "dismissal_date"])
-    _add_change(employee, "Сотрудник уволен")
+    write_audit_log(
+        request,
+        AuditLog.ACTION_UPDATE,
+        "Сотрудник уволен",
+        obj=employee,
+        before=before,
+        after=snapshot_instance(employee),
+        employee=employee,
+    )
     messages.warning(request, "Сотрудник переведён в статус уволенного.")
     return redirect(request.POST.get("next") or reverse("employee_detail", args=[employee.pk]))
 
 
+@login_required
+@permission_required("hr.change_employee", raise_exception=True)
 @require_POST
 def employee_restore(request, pk):
     employee = get_object_or_404(Employee, pk=pk)
+    before = snapshot_instance(employee)
     employee.is_active = True
     employee.dismissal_date = None
     employee.save(update_fields=["is_active", "dismissal_date"])
-    _add_change(employee, "Сотрудник возвращён в штат")
+    write_audit_log(
+        request,
+        AuditLog.ACTION_UPDATE,
+        "Сотрудник возвращён в штат",
+        obj=employee,
+        before=before,
+        after=snapshot_instance(employee),
+        employee=employee,
+    )
     messages.success(request, "Сотрудник возвращён в штат.")
     return redirect(request.POST.get("next") or reverse("employee_detail", args=[employee.pk]))
+
+
+@login_required
+@permission_required("hr.view_employee", raise_exception=True)
+def employees_export(request):
+    employees = _filtered_employees(request)
+    rows_count = employees.count()
+    content = build_employee_workbook(employees)
+    write_audit_log(
+        request,
+        AuditLog.ACTION_EXPORT,
+        f"Экспорт сотрудников в Excel: {rows_count} строк",
+        after={"rows": rows_count, "filters": dict(request.GET.lists())},
+        write_change=False,
+    )
+    response = HttpResponse(
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="employees.xlsx"'
+    return response
+
+
+@login_required
+@permission_required(("hr.add_employee", "hr.change_employee"), raise_exception=True)
+def employees_import(request):
+    result = None
+    if request.method == "POST":
+        upload = request.FILES.get("file")
+        if not upload:
+            messages.error(request, "Выберите файл .xlsx для импорта.")
+        elif not upload.name.lower().endswith(".xlsx"):
+            messages.error(request, "Поддерживается только формат .xlsx.")
+        else:
+            try:
+                result = import_employees_from_xlsx(upload)
+            except Exception as exc:
+                result = {
+                    "created": 0,
+                    "updated": 0,
+                    "skipped": 0,
+                    "errors": [f"Файл не удалось прочитать: {exc}"],
+                }
+            if result["errors"]:
+                messages.warning(
+                    request,
+                    "Импорт завершён с ошибками. Проверьте отчёт ниже.",
+                )
+            else:
+                messages.success(request, "Импорт сотрудников выполнен.")
+            write_audit_log(
+                request,
+                AuditLog.ACTION_IMPORT,
+                (
+                    "Импорт сотрудников: "
+                    f"{result['created']} создано, {result['updated']} обновлено, "
+                    f"{len(result['errors'])} ошибок"
+                ),
+                after=result,
+                write_change=False,
+            )
+
+    return render(request, "hr/employees/import.html", {"result": result})
+
+
+@login_required
+@permission_required("hr.view_employee", raise_exception=True)
+def employees_import_template(request):
+    content = build_employee_workbook(Employee.objects.none(), include_rows=False)
+    response = HttpResponse(
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="employees_import_template.xlsx"'
+    return response
+
+
+@login_required
+@permission_required("hr.view_employee", raise_exception=True)
+@require_POST
+def employee_columns_update(request):
+    save_employee_column_preference(
+        request.user,
+        request.POST.getlist("columns"),
+        request.POST.get("page_size"),
+    )
+    messages.success(request, "Настройки таблицы сохранены.")
+    return redirect(request.POST.get("next") or reverse("employees_list"))
 
 
 def _probation_stage_due(probation, offset_days):
@@ -323,6 +481,8 @@ def _probation_stage_status(done, due_date, today):
     return "pending"
 
 
+@login_required
+@permission_required("hr.view_probation", raise_exception=True)
 def probation_list(request):
     today = timezone.localdate()
     probations = Probation.objects.select_related(
@@ -369,6 +529,8 @@ def probation_list(request):
     )
 
 
+@login_required
+@permission_required("hr.change_probation", raise_exception=True)
 @require_POST
 def probation_toggle_stage(request, pk, field):
     if field not in PROBATION_STAGE_FIELDS:
@@ -376,15 +538,27 @@ def probation_toggle_stage(request, pk, field):
         return redirect("probation_list")
 
     probation = get_object_or_404(Probation.objects.select_related("employee"), pk=pk)
+    before = snapshot_instance(probation)
     setattr(probation, field, not getattr(probation, field))
     probation.save(update_fields=[field])
-    _add_change(probation.employee, f"Изменён этап испытательного срока: {field}")
+    write_audit_log(
+        request,
+        AuditLog.ACTION_UPDATE,
+        f"Изменён этап испытательного срока: {field}",
+        obj=probation,
+        before=before,
+        after=snapshot_instance(probation),
+        employee=probation.employee,
+    )
     return redirect("probation_list")
 
 
+@login_required
+@permission_required("hr.change_probation", raise_exception=True)
 @require_POST
 def probation_set_result(request, pk):
     probation = get_object_or_404(Probation.objects.select_related("employee"), pk=pk)
+    before = snapshot_instance(probation)
     result = request.POST.get("result")
     if result not in [Probation.RESULT_PASSED, Probation.RESULT_FAILED]:
         messages.error(request, "Некорректный результат испытательного срока.")
@@ -392,7 +566,15 @@ def probation_set_result(request, pk):
 
     probation.result = result
     probation.save(update_fields=["result"])
-    _add_change(probation.employee, f"Испытательный срок: {probation.get_result_display()}")
+    write_audit_log(
+        request,
+        AuditLog.ACTION_UPDATE,
+        f"Испытательный срок: {probation.get_result_display()}",
+        obj=probation,
+        before=before,
+        after=snapshot_instance(probation),
+        employee=probation.employee,
+    )
     messages.success(request, "Результат испытательного срока обновлён.")
     return redirect("probation_list")
 
@@ -426,14 +608,14 @@ def _build_department_tree():
     return [build_node(department) for department in root_departments]
 
 
+@login_required
+@permission_required("hr.view_department", raise_exception=True)
 def departments_list(request):
-    return render(
-        request,
-        "hr/departments/list.html",
-        {"tree": _build_department_tree()},
-    )
+    return render(request, "hr/departments/list.html", {"tree": _build_department_tree()})
 
 
+@login_required
+@permission_required("hr.view_department", raise_exception=True)
 def departments_export(request):
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = 'attachment; filename="departments.csv"'
@@ -452,14 +634,31 @@ def departments_export(request):
                 department.active_employees,
             ]
         )
+    write_audit_log(
+        request,
+        AuditLog.ACTION_EXPORT,
+        "Выгрузка структуры подразделений",
+        after={"rows": departments.count()},
+        write_change=False,
+    )
     return response
 
 
+@login_required
+@permission_required("hr.add_department", raise_exception=True)
 def department_create(request):
     if request.method == "POST":
         form = DepartmentForm(request.POST)
         if form.is_valid():
-            form.save()
+            department = form.save()
+            write_audit_log(
+                request,
+                AuditLog.ACTION_CREATE,
+                "Создано подразделение",
+                obj=department,
+                after=snapshot_instance(department),
+                write_change=False,
+            )
             messages.success(request, "Подразделение создано.")
             return redirect("departments_list")
     else:
@@ -472,12 +671,24 @@ def department_create(request):
     )
 
 
+@login_required
+@permission_required("hr.change_department", raise_exception=True)
 def department_edit(request, pk):
     department = get_object_or_404(Department, pk=pk)
+    before = snapshot_instance(department)
     if request.method == "POST":
         form = DepartmentForm(request.POST, instance=department)
         if form.is_valid():
-            form.save()
+            department = form.save()
+            write_audit_log(
+                request,
+                AuditLog.ACTION_UPDATE,
+                "Обновлено подразделение",
+                obj=department,
+                before=before,
+                after=snapshot_instance(department),
+                write_change=False,
+            )
             messages.success(request, "Подразделение обновлено.")
             return redirect("departments_list")
     else:
@@ -522,10 +733,16 @@ def _add_calendar_event(events, event_date, event_type, title, url=""):
         )
 
 
+@login_required
+@permission_required("hr.view_employee", raise_exception=True)
 def calendar_view(request):
     year, month = _safe_month_from_request(request)
     selected_types = request.GET.getlist("type") or list(CALENDAR_EVENT_TYPES.keys())
-    selected_types = [event_type for event_type in selected_types if event_type in CALENDAR_EVENT_TYPES]
+    selected_types = [
+        event_type
+        for event_type in selected_types
+        if event_type in CALENDAR_EVENT_TYPES
+    ]
     month_start, month_end = _month_bounds(year, month)
     events = defaultdict(list)
 
@@ -656,23 +873,31 @@ def calendar_view(request):
     )
 
 
+@login_required
+@permission_required("hr.view_campaign", raise_exception=True)
 def campaigns_list(request):
     campaigns = Campaign.objects.annotate(record_count=Count("records")).order_by(
         "-year",
         "season",
     )
-    return render(
-        request,
-        "hr/campaigns/list.html",
-        {"campaigns": campaigns},
-    )
+    return render(request, "hr/campaigns/list.html", {"campaigns": campaigns})
 
 
+@login_required
+@permission_required("hr.add_campaign", raise_exception=True)
 def campaign_create(request):
     if request.method == "POST":
         form = CampaignForm(request.POST)
         if form.is_valid():
             campaign = form.save()
+            write_audit_log(
+                request,
+                AuditLog.ACTION_CREATE,
+                "Создана кампания",
+                obj=campaign,
+                after=snapshot_instance(campaign),
+                write_change=False,
+            )
             messages.success(request, "Кампания создана.")
             return redirect("campaign_detail", pk=campaign.pk)
     else:
@@ -685,6 +910,8 @@ def campaign_create(request):
     )
 
 
+@login_required
+@permission_required("hr.view_campaign", raise_exception=True)
 def campaign_detail(request, pk):
     campaign = get_object_or_404(Campaign.objects.annotate(record_count=Count("records")), pk=pk)
     records = campaign.records.select_related("employee", "employee__department", "employee__position")
@@ -700,6 +927,8 @@ def campaign_detail(request, pk):
     )
 
 
+@login_required
+@permission_required("hr.add_campaignrecord", raise_exception=True)
 @require_POST
 def campaign_record_add(request, pk):
     campaign = get_object_or_404(Campaign, pk=pk)
@@ -708,14 +937,34 @@ def campaign_record_add(request, pk):
         record = form.save(commit=False)
         record.campaign = campaign
         record.save()
-        _add_change(record.employee, f"Добавлена запись кампании {campaign}")
+        write_audit_log(
+            request,
+            AuditLog.ACTION_CREATE,
+            f"Добавлена запись кампании {campaign}",
+            obj=record,
+            after=snapshot_instance(record),
+            employee=record.employee,
+        )
         messages.success(request, "Запись кампании добавлена.")
     else:
         messages.error(request, "Запись не сохранена. Проверьте поля формы.")
     return redirect("campaign_detail", pk=campaign.pk)
 
 
+@login_required
 def simple_page(request, page):
+    required_permissions = {
+        "guide": "hr.view_employee",
+        "positions": "hr.view_position",
+        "mail_templates": "hr.view_employee",
+        "users": "auth.view_user",
+        "data_audit": "hr.view_auditlog",
+        "action_log": "hr.view_auditlog",
+    }
+    permission = required_permissions.get(page)
+    if permission and not request.user.has_perm(permission):
+        raise PermissionDenied
+
     page_config = SIMPLE_PAGES[page]
     context = {
         "title": page_config["title"],
@@ -724,6 +973,8 @@ def simple_page(request, page):
     }
     if page == "positions":
         context["positions"] = Position.objects.annotate(employee_count=Count("employees"))
+    if page == "users":
+        context["users"] = get_user_model().objects.prefetch_related("groups").order_by("username")
     if page in ["data_audit", "action_log"]:
-        context["changes"] = ChangeLog.objects.select_related("employee")[:30]
+        context["audit_logs"] = AuditLog.objects.select_related("actor")[:50]
     return render(request, "hr/simple_page.html", context)

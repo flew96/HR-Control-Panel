@@ -28,6 +28,15 @@
                     <a href="{% url 'action_log' %}">Журнал действий</a>
                 </div>
             </div>
+            {% if request.user.is_authenticated %}
+                <div class="user-menu">
+                    <span>{{ request.user.username }}</span>
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button class="link-button" type="submit">Выйти</button>
+                    </form>
+                </div>
+            {% endif %}
         </nav>
     </header>
 
@@ -44,4 +53,3 @@
     <script src="{% static 'hr/js/app.js' %}"></script>
 </body>
 </html>
-

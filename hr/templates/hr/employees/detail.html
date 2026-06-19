@@ -14,17 +14,19 @@
         {% endif %}
     </div>
     <div class="header-actions">
-        <a class="btn secondary" href="{% url 'employee_edit' employee.pk %}">Редактировать</a>
-        {% if employee.is_active %}
-            <form method="post" action="{% url 'employee_terminate' employee.pk %}">
-                {% csrf_token %}
-                <button class="btn danger" type="submit">Уволить</button>
-            </form>
-        {% else %}
-            <form method="post" action="{% url 'employee_restore' employee.pk %}">
-                {% csrf_token %}
-                <button class="btn primary" type="submit">Вернуть в штат</button>
-            </form>
+        {% if perms.hr.change_employee %}
+            <a class="btn secondary" href="{% url 'employee_edit' employee.pk %}">Редактировать</a>
+            {% if employee.is_active %}
+                <form method="post" action="{% url 'employee_terminate' employee.pk %}">
+                    {% csrf_token %}
+                    <button class="btn danger" type="submit">Уволить</button>
+                </form>
+            {% else %}
+                <form method="post" action="{% url 'employee_restore' employee.pk %}">
+                    {% csrf_token %}
+                    <button class="btn primary" type="submit">Вернуть в штат</button>
+                </form>
+            {% endif %}
         {% endif %}
     </div>
 </section>
@@ -106,4 +108,3 @@
     </div>
 </section>
 {% endblock %}
-

@@ -2,16 +2,20 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 import random
 
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group, Permission
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from hr.models import (
+    AuditLog,
     Campaign,
     CampaignRecord,
     ChangeLog,
     Contract,
     Department,
     Employee,
+    EmployeeColumnPreference,
     Position,
     Probation,
 )
@@ -25,13 +29,14 @@ class Command(BaseCommand):
         today = date(2026, 6, 19)
 
         self._clear_data()
+        users = self._create_roles_and_users()
         departments = self._create_departments()
         positions = self._create_positions()
         employees = self._create_employees(rng, today, departments, positions)
         self._assign_managers(rng, employees)
         self._create_probations(today, employees)
         self._create_campaigns(rng, today, employees)
-        self._create_change_logs(rng, today, employees)
+        self._create_change_logs(rng, today, employees, users)
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -47,12 +52,82 @@ class Command(BaseCommand):
             Campaign,
             Probation,
             Contract,
+            EmployeeColumnPreference,
+            AuditLog,
             ChangeLog,
             Employee,
             Department,
             Position,
         ]:
             model.objects.all().delete()
+
+    def _create_roles_and_users(self):
+        group_names = ["HR Admin", "HR Manager", "HR Viewer"]
+        for name in group_names:
+            Group.objects.filter(name=name).delete()
+
+        User = get_user_model()
+        User.objects.filter(username__in=["hr_admin", "hr_manager", "hr_viewer"]).delete()
+
+        admin_group = Group.objects.create(name="HR Admin")
+        manager_group = Group.objects.create(name="HR Manager")
+        viewer_group = Group.objects.create(name="HR Viewer")
+
+        hr_permissions = list(Permission.objects.filter(content_type__app_label="hr"))
+        user_permissions = list(
+            Permission.objects.filter(
+                content_type__app_label="auth",
+                content_type__model="user",
+                codename__in=["view_user", "add_user", "change_user"],
+            )
+        )
+        admin_group.permissions.set(hr_permissions + user_permissions)
+
+        manager_permissions = [
+            permission
+            for permission in hr_permissions
+            if permission.codename.startswith(("view_", "add_", "change_"))
+        ]
+        manager_group.permissions.set(manager_permissions)
+
+        viewer_permissions = [
+            permission
+            for permission in hr_permissions
+            if permission.codename.startswith("view_")
+        ]
+        viewer_group.permissions.set(viewer_permissions)
+
+        admin = User.objects.create_user(
+            username="hr_admin",
+            password="Admin12345!",
+            email="hr_admin@example.test",
+            first_name="HR",
+            last_name="Admin",
+            is_staff=True,
+            is_superuser=True,
+        )
+        manager = User.objects.create_user(
+            username="hr_manager",
+            password="Manager12345!",
+            email="hr_manager@example.test",
+            first_name="HR",
+            last_name="Manager",
+        )
+        viewer = User.objects.create_user(
+            username="hr_viewer",
+            password="Viewer12345!",
+            email="hr_viewer@example.test",
+            first_name="HR",
+            last_name="Viewer",
+        )
+        admin.groups.add(admin_group)
+        manager.groups.add(manager_group)
+        viewer.groups.add(viewer_group)
+
+        for user in [admin, manager, viewer]:
+            EmployeeColumnPreference.objects.get_or_create(user=user)
+
+        return {"admin": admin, "manager": manager, "viewer": viewer}
 
     def _create_departments(self):
         department_specs = [
@@ -436,7 +511,7 @@ class Command(BaseCommand):
                     ),
                 )
 
-    def _create_change_logs(self, rng, today, employees):
+    def _create_change_logs(self, rng, today, employees, users):
         events = [
             "Обновлён статус ИПР",
             "Изменён тип договора",
@@ -449,16 +524,43 @@ class Command(BaseCommand):
 
         for index, employee in enumerate(employees[:80]):
             created_at = self._aware_datetime(today - timedelta(days=index % 28), 9 + index % 8)
+            event = rng.choice(events)
             ChangeLog.objects.create(
                 created_at=created_at,
                 employee=employee,
-                event=rng.choice(events),
+                event=event,
             )
+            if index < 35:
+                AuditLog.objects.create(
+                    created_at=created_at,
+                    actor=users["manager"] if index % 3 else users["admin"],
+                    action=AuditLog.ACTION_UPDATE,
+                    model_name="Employee",
+                    object_id=str(employee.pk),
+                    object_repr=employee.full_name,
+                    event=event,
+                    before={"demo": "before"},
+                    after={"demo": "after"},
+                    ip_address="127.0.0.1",
+                    path="/seed_demo_data/",
+                )
 
         ChangeLog.objects.create(
             created_at=self._aware_datetime(today, 12),
             employee=None,
             event="Демо-данные пересозданы командой seed_demo_data",
+        )
+        AuditLog.objects.create(
+            created_at=self._aware_datetime(today, 12),
+            actor=users["admin"],
+            action=AuditLog.ACTION_IMPORT,
+            model_name="",
+            object_id="",
+            object_repr="",
+            event="Демо-данные пересозданы командой seed_demo_data",
+            after={"employees": len(employees)},
+            ip_address="127.0.0.1",
+            path="/seed_demo_data/",
         )
 
     def _aware_datetime(self, day, hour):

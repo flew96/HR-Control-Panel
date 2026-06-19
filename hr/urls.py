@@ -6,6 +6,10 @@ from . import views
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("employees/", views.employees_list, name="employees_list"),
+    path("employees/export/", views.employees_export, name="employees_export"),
+    path("employees/import/", views.employees_import, name="employees_import"),
+    path("employees/import/template/", views.employees_import_template, name="employees_import_template"),
+    path("employees/columns/", views.employee_columns_update, name="employee_columns_update"),
     path("employees/new/", views.employee_create, name="employee_create"),
     path("employees/<int:pk>/", views.employee_detail, name="employee_detail"),
     path("employees/<int:pk>/edit/", views.employee_edit, name="employee_edit"),

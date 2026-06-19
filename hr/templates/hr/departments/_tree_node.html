@@ -4,7 +4,7 @@
         <span class="department-meta">
             <span class="badge badge-blue">{{ node.total_count }} всего</span>
             <span class="badge badge-gray">{{ node.direct_count }} прямо</span>
-            <a href="{% url 'department_edit' node.department.pk %}">Редактировать</a>
+            {% if perms.hr.change_department %}<a href="{% url 'department_edit' node.department.pk %}">Редактировать</a>{% endif %}
         </span>
     </summary>
     {% if node.children %}
@@ -15,4 +15,3 @@
         </div>
     {% endif %}
 </details>
-

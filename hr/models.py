@@ -1,4 +1,20 @@
+from django.conf import settings
 from django.db import models
+
+
+def default_employee_columns():
+    return [
+        "select",
+        "full_name",
+        "department",
+        "position",
+        "manager",
+        "ipr_status",
+        "contract_type",
+        "salary_gross",
+        "salary_net",
+        "currency",
+    ]
 
 
 class Department(models.Model):
@@ -252,3 +268,68 @@ class ChangeLog(models.Model):
         employee = self.employee.full_name if self.employee else "Система"
         return f"{self.created_at:%Y-%m-%d}: {employee} - {self.event}"
 
+
+class AuditLog(models.Model):
+    ACTION_CREATE = "create"
+    ACTION_UPDATE = "update"
+    ACTION_DELETE = "delete"
+    ACTION_IMPORT = "import"
+    ACTION_EXPORT = "export"
+    ACTION_LOGIN = "login"
+    ACTION_OTHER = "other"
+
+    ACTION_CHOICES = [
+        (ACTION_CREATE, "создание"),
+        (ACTION_UPDATE, "изменение"),
+        (ACTION_DELETE, "удаление"),
+        (ACTION_IMPORT, "импорт"),
+        (ACTION_EXPORT, "экспорт"),
+        (ACTION_LOGIN, "вход"),
+        (ACTION_OTHER, "другое"),
+    ]
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+    )
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    model_name = models.CharField(max_length=120, blank=True)
+    object_id = models.CharField(max_length=80, blank=True)
+    object_repr = models.CharField(max_length=255, blank=True)
+    event = models.CharField(max_length=255)
+    before = models.JSONField(null=True, blank=True)
+    after = models.JSONField(null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    path = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["action", "model_name"]),
+        ]
+
+    def __str__(self):
+        actor = self.actor.get_username() if self.actor else "system"
+        return f"{self.created_at:%Y-%m-%d %H:%M}: {actor} - {self.event}"
+
+
+class EmployeeColumnPreference(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="employee_column_preference",
+    )
+    columns = models.JSONField(default=default_employee_columns)
+    page_size = models.PositiveIntegerField(default=25)
+
+    class Meta:
+        verbose_name = "employee column preference"
+        verbose_name_plural = "employee column preferences"
+
+    def __str__(self):
+        return f"{self.user} employee columns"

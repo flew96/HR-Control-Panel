@@ -1,0 +1,33 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Вход - HR Control Panel</title>
+    <link rel="stylesheet" href="{% static 'hr/css/styles.css' %}">
+</head>
+<body>
+    <main class="auth-shell">
+        <form class="panel auth-card" method="post">
+            {% csrf_token %}
+            <div>
+                <p class="eyebrow">HR Control Panel</p>
+                <h1>Вход</h1>
+            </div>
+            {% if form.errors %}
+                <div class="message error">Неверный логин или пароль.</div>
+            {% endif %}
+            <label>
+                <span>Логин</span>
+                {{ form.username }}
+            </label>
+            <label>
+                <span>Пароль</span>
+                {{ form.password }}
+            </label>
+            <button class="btn primary" type="submit">Войти</button>
+        </form>
+    </main>
+</body>
+</html>

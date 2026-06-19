@@ -1,0 +1,47 @@
+{% extends "hr/base.html" %}
+
+{% block title %}Импорт сотрудников - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Employees</p>
+        <h1>Импорт сотрудников из Excel</h1>
+        <p class="page-description">Импорт создаёт новых сотрудников или обновляет существующих по ID, затем по email. Подразделения и должности создаются автоматически.</p>
+    </div>
+    <div class="header-actions">
+        <a class="btn secondary" href="{% url 'employees_import_template' %}">Скачать шаблон</a>
+        <a class="btn ghost" href="{% url 'employees_list' %}">Назад</a>
+    </div>
+</section>
+
+<form class="panel form-panel narrow-form" method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <label>
+        <span>Файл .xlsx</span>
+        <input class="form-control" type="file" name="file" accept=".xlsx" required>
+    </label>
+    <div class="form-actions">
+        <button class="btn primary" type="submit">Импортировать</button>
+    </div>
+</form>
+
+{% if result %}
+    <section class="panel">
+        <div class="panel-header"><h2>Результат импорта</h2></div>
+        <div class="stats-grid compact-stats">
+            <article class="stat-card accent-green"><span>Создано</span><strong>{{ result.created }}</strong></article>
+            <article class="stat-card accent-blue"><span>Обновлено</span><strong>{{ result.updated }}</strong></article>
+            <article class="stat-card accent-amber"><span>Пропущено</span><strong>{{ result.skipped }}</strong></article>
+            <article class="stat-card accent-red"><span>Ошибки</span><strong>{{ result.errors|length }}</strong></article>
+        </div>
+        {% if result.errors %}
+            <div class="import-errors">
+                {% for error in result.errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </section>
+{% endif %}
+{% endblock %}

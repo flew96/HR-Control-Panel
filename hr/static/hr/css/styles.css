@@ -92,7 +92,24 @@ a:hover {
 
 .dropdown {
     position: relative;
+}
+
+.user-menu {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
     margin-left: auto;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.link-button {
+    border: 0;
+    background: transparent;
+    color: var(--blue);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
 }
 
 .dropdown-menu {
@@ -440,6 +457,29 @@ textarea.form-control {
     top: 84px;
 }
 
+.column-settings summary {
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.column-options {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(120px, 1fr));
+    gap: 10px 14px;
+    align-items: end;
+    margin-top: 14px;
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding-top: 16px;
+    color: var(--muted);
+    font-weight: 700;
+}
+
 .summary-list {
     display: grid;
     gap: 10px;
@@ -573,6 +613,15 @@ dd {
     cursor: pointer;
 }
 
+.stage-readonly {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    width: 100%;
+    font-weight: 800;
+}
+
 .stage-done {
     background: var(--green-soft);
     color: var(--green);
@@ -703,9 +752,60 @@ dd {
     max-width: 760px;
 }
 
+.compact-stats {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+}
+
+.import-errors {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.import-errors div {
+    padding: 8px 10px;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    background: var(--red-soft);
+    color: var(--red);
+    font-weight: 650;
+}
+
+.auth-shell {
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    padding: 24px;
+}
+
+.auth-card {
+    width: min(420px, 100%);
+    display: grid;
+    gap: 16px;
+}
+
+.auth-card h1 {
+    margin: 0;
+    font-size: 28px;
+}
+
+.auth-card input[type="text"],
+.auth-card input[type="password"] {
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font: inherit;
+}
+
 @media (max-width: 1180px) {
     .stats-grid {
         grid-template-columns: repeat(3, minmax(160px, 1fr));
+    }
+
+    .column-options {
+        grid-template-columns: repeat(3, minmax(150px, 1fr));
     }
 
     .dashboard-grid,
@@ -752,6 +852,7 @@ dd {
 
     .stats-grid,
     .form-grid,
+    .column-options,
     .filters {
         grid-template-columns: 1fr;
     }
@@ -760,4 +861,3 @@ dd {
         grid-template-columns: repeat(7, minmax(130px, 1fr));
     }
 }
-
