@@ -1,0 +1,54 @@
+{% extends "hr/base.html" %}
+
+{% block title %}Календарь - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Calendar</p>
+        <h1>{{ month_name }} {{ year }}</h1>
+    </div>
+    <div class="header-actions">
+        <a class="btn secondary" href="{{ prev_url }}">Предыдущий</a>
+        <a class="btn secondary" href="{{ next_url }}">Следующий</a>
+    </div>
+</section>
+
+<form class="filters calendar-filters" method="get">
+    <input type="hidden" name="year" value="{{ year }}">
+    {% for key, label in event_types.items %}
+        <label class="checkbox-row">
+            <input type="checkbox" name="type" value="{{ key }}" {% if key in selected_types %}checked{% endif %}>
+            <span>{{ label }}</span>
+        </label>
+    {% endfor %}
+    <button class="btn primary" type="submit">Показать</button>
+</form>
+
+<section class="calendar-grid">
+    <div class="calendar-head">Пн</div>
+    <div class="calendar-head">Вт</div>
+    <div class="calendar-head">Ср</div>
+    <div class="calendar-head">Чт</div>
+    <div class="calendar-head">Пт</div>
+    <div class="calendar-head">Сб</div>
+    <div class="calendar-head">Вс</div>
+    {% for week in weeks %}
+        {% for day in week %}
+            <div class="calendar-day {% if not day.in_month %}muted-day{% endif %} {% if day.is_today %}today{% endif %}">
+                <div class="calendar-date">{{ day.date.day }}</div>
+                <div class="calendar-events">
+                    {% for event in day.events %}
+                        {% if event.url %}
+                            <a class="calendar-event event-{{ event.type }}" href="{{ event.url }}">{{ event.title }}</a>
+                        {% else %}
+                            <span class="calendar-event event-{{ event.type }}">{{ event.title }}</span>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
+    {% endfor %}
+</section>
+{% endblock %}
+

@@ -1,0 +1,66 @@
+{% extends "hr/base.html" %}
+
+{% block title %}{{ campaign }} - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Campaign</p>
+        <h1>{{ campaign }}</h1>
+        {% if campaign.status == "open" %}
+            <span class="badge badge-green">{{ campaign.get_status_display }}</span>
+        {% else %}
+            <span class="badge badge-gray">{{ campaign.get_status_display }}</span>
+        {% endif %}
+    </div>
+</section>
+
+<section class="detail-grid">
+    <div class="panel">
+        <div class="panel-header"><h2>Параметры кампании</h2></div>
+        <dl class="detail-list">
+            <dt>Старт</dt><dd>{{ campaign.start_date|date:"d.m.Y" }}</dd>
+            <dt>Дата применения</dt><dd>{{ campaign.default_apply_date|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Закрыта</dt><dd>{{ campaign.closed_at|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Записей</dt><dd>{{ campaign.record_count }}</dd>
+        </dl>
+    </div>
+    <form class="panel form-panel compact-form" method="post" action="{% url 'campaign_record_add' campaign.pk %}">
+        {% csrf_token %}
+        <div class="panel-header"><h2>Добавить запись</h2></div>
+        {% for field in form %}
+            <label>
+                <span>{{ field.label }}</span>
+                {{ field }}
+            </label>
+        {% endfor %}
+        <button class="btn primary" type="submit">Добавить запись</button>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="panel-header"><h2>Записи кампании</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Сотрудник</th><th>Подразделение</th><th>Должность</th><th>Статус</th><th>Значение</th><th>Комментарий</th></tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                    <tr>
+                        <td><a href="{% url 'employee_detail' record.employee.pk %}">{{ record.employee.full_name }}</a></td>
+                        <td>{{ record.employee.department|default:"-" }}</td>
+                        <td>{{ record.employee.position|default:"-" }}</td>
+                        <td>{{ record.get_status_display }}</td>
+                        <td>{{ record.value|default:"-" }}</td>
+                        <td>{{ record.comment|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="6" class="empty">Записей пока нет.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+

@@ -1,0 +1,47 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}HR Control Panel{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'hr/css/styles.css' %}">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="{% url 'dashboard' %}">HR Control Panel</a>
+        <nav class="nav">
+            <a href="{% url 'dashboard' %}">Главная</a>
+            <a href="{% url 'employees_list' %}">Сотрудники</a>
+            <a href="{% url 'probation_list' %}">Испытательный срок</a>
+            <a href="{% url 'departments_list' %}">Подразделения</a>
+            <a href="{% url 'calendar' %}">Календарь</a>
+            <a href="{% url 'campaigns_list' %}">Кампании</a>
+            <div class="dropdown">
+                <button class="dropdown-toggle" type="button">Ещё</button>
+                <div class="dropdown-menu">
+                    <a href="{% url 'guide' %}">Руководство</a>
+                    <a href="{% url 'positions' %}">Должности</a>
+                    <a href="{% url 'mail_templates' %}">Шаблоны писем</a>
+                    <a href="{% url 'users' %}">Пользователи</a>
+                    <a href="{% url 'data_audit' %}">Аудит-лог данных</a>
+                    <a href="{% url 'action_log' %}">Журнал действий</a>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main class="page-shell">
+        {% if messages %}
+            <div class="messages">
+                {% for message in messages %}
+                    <div class="message {{ message.tags }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+    <script src="{% static 'hr/js/app.js' %}"></script>
+</body>
+</html>
+

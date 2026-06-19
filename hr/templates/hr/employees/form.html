@@ -1,0 +1,32 @@
+{% extends "hr/base.html" %}
+
+{% block title %}{{ title }} - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Employee</p>
+        <h1>{{ title }}</h1>
+    </div>
+</section>
+
+<form class="panel form-panel" method="post">
+    {% csrf_token %}
+    <div class="form-grid">
+        {% for field in form %}
+            <label class="{% if field.field.widget.input_type == 'checkbox' %}checkbox-row form-checkbox{% endif %}">
+                <span>{{ field.label }}</span>
+                {{ field }}
+                {% if field.errors %}
+                    <small class="error">{{ field.errors|join:", " }}</small>
+                {% endif %}
+            </label>
+        {% endfor %}
+    </div>
+    <div class="form-actions">
+        <button class="btn primary" type="submit">Сохранить</button>
+        <a class="btn ghost" href="{% if employee %}{% url 'employee_detail' employee.pk %}{% else %}{% url 'employees_list' %}{% endif %}">Отмена</a>
+    </div>
+</form>
+{% endblock %}
+

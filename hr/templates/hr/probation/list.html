@@ -1,0 +1,112 @@
+{% extends "hr/base.html" %}
+
+{% block title %}Испытательный срок - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Probation</p>
+        <h1>Испытательный срок</h1>
+    </div>
+</section>
+
+<section class="panel alert-panel">
+    <div class="panel-header">
+        <h2>Не прошли испытательный срок, ожидают увольнения</h2>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Сотрудник</th><th>Дата найма</th><th>Конец ИС</th><th>Действие</th></tr>
+            </thead>
+            <tbody>
+                {% for probation in pending_dismissals %}
+                    <tr>
+                        <td><a href="{% url 'employee_detail' probation.employee.pk %}">{{ probation.employee.full_name }}</a></td>
+                        <td>{{ probation.employee.hire_date|date:"d.m.Y"|default:"-" }}</td>
+                        <td>{{ probation.end_date|date:"d.m.Y" }}</td>
+                        <td>
+                            <form method="post" action="{% url 'employee_terminate' probation.employee.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="{% url 'probation_list' %}">
+                                <button class="btn danger small-btn" type="submit">Уволить</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" class="empty">Нет сотрудников, ожидающих увольнения.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="table-wrap wide-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Сотрудник</th>
+                    <th>Дата найма</th>
+                    <th>Конец ИС</th>
+                    <th>Дней до конца</th>
+                    <th>1 неделя</th>
+                    <th>1 месяц</th>
+                    <th>Промежуточная оценка</th>
+                    <th>2 месяца</th>
+                    <th>Финальная оценка</th>
+                    <th>Финальный опрос</th>
+                    <th>Комментарий</th>
+                    <th>Финализация</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td><a class="table-main-link" href="{% url 'employee_detail' row.probation.employee.pk %}">{{ row.probation.employee.full_name }}</a></td>
+                        <td>{{ row.probation.employee.hire_date|date:"d.m.Y"|default:"-" }}</td>
+                        <td>{{ row.probation.end_date|date:"d.m.Y" }}</td>
+                        <td>
+                            {% if row.days_left < 0 %}
+                                <span class="badge badge-red">{{ row.days_left }}</span>
+                            {% elif row.days_left == 0 %}
+                                <span class="badge badge-amber">сегодня</span>
+                            {% else %}
+                                {{ row.days_left }}
+                            {% endif %}
+                        </td>
+                        {% for stage in row.stages %}
+                            <td class="stage-cell stage-{{ stage.status }}">
+                                <form method="post" action="{% url 'probation_toggle_stage' row.probation.pk stage.field %}">
+                                    {% csrf_token %}
+                                    <button type="submit" title="{{ stage.title }}: {{ stage.due_date|date:'d.m.Y' }}">
+                                        {% if stage.done %}Пройден{% else %}Открыт{% endif %}
+                                    </button>
+                                </form>
+                            </td>
+                        {% endfor %}
+                        <td>{{ row.probation.comment|default:"-" }}</td>
+                        <td>
+                            <div class="inline-actions">
+                                <form method="post" action="{% url 'probation_set_result' row.probation.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="result" value="passed">
+                                    <button class="btn success small-btn" type="submit">Пройден</button>
+                                </form>
+                                <form method="post" action="{% url 'probation_set_result' row.probation.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="result" value="failed">
+                                    <button class="btn danger small-btn" type="submit">Не пройден</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="12" class="empty">Нет сотрудников на испытательном сроке.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+

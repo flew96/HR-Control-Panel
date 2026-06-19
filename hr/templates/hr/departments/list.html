@@ -1,0 +1,27 @@
+{% extends "hr/base.html" %}
+
+{% block title %}Подразделения - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Departments</p>
+        <h1>Подразделения</h1>
+    </div>
+    <div class="header-actions">
+        <a class="btn secondary" href="{% url 'departments_export' %}">Выгрузить структуру</a>
+        <a class="btn primary" href="{% url 'department_create' %}">Добавить подразделение</a>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="department-tree">
+        {% for node in tree %}
+            {% include "hr/departments/_tree_node.html" with node=node %}
+        {% empty %}
+            <p class="empty">Подразделения ещё не созданы.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
+

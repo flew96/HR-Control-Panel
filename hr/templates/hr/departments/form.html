@@ -1,0 +1,28 @@
+{% extends "hr/base.html" %}
+
+{% block title %}{{ title }} - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Departments</p>
+        <h1>{{ title }}</h1>
+    </div>
+</section>
+
+<form class="panel form-panel narrow-form" method="post">
+    {% csrf_token %}
+    {% for field in form %}
+        <label>
+            <span>{{ field.label }}</span>
+            {{ field }}
+            {% if field.errors %}<small class="error">{{ field.errors|join:", " }}</small>{% endif %}
+        </label>
+    {% endfor %}
+    <div class="form-actions">
+        <button class="btn primary" type="submit">Сохранить</button>
+        <a class="btn ghost" href="{% url 'departments_list' %}">Отмена</a>
+    </div>
+</form>
+{% endblock %}
+

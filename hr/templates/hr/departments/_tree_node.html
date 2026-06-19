@@ -1,0 +1,18 @@
+<details class="department-node" open>
+    <summary>
+        <span>{{ node.department.name }}</span>
+        <span class="department-meta">
+            <span class="badge badge-blue">{{ node.total_count }} всего</span>
+            <span class="badge badge-gray">{{ node.direct_count }} прямо</span>
+            <a href="{% url 'department_edit' node.department.pk %}">Редактировать</a>
+        </span>
+    </summary>
+    {% if node.children %}
+        <div class="department-children">
+            {% for child in node.children %}
+                {% include "hr/departments/_tree_node.html" with node=child %}
+            {% endfor %}
+        </div>
+    {% endif %}
+</details>
+

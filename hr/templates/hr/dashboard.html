@@ -1,0 +1,99 @@
+{% extends "hr/base.html" %}
+
+{% block title %}Главная - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Dashboard</p>
+        <h1>Панель управления HR</h1>
+    </div>
+</section>
+
+<section class="stats-grid">
+    {% for stat in stats %}
+        <article class="stat-card accent-{{ stat.accent }}">
+            <span>{{ stat.label }}</span>
+            <strong>{{ stat.value }}</strong>
+        </article>
+    {% endfor %}
+</section>
+
+<section class="dashboard-grid">
+    <div class="panel">
+        <div class="panel-header">
+            <h2>Контракты истекают в течение 30 дней</h2>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Сотрудник</th>
+                        <th>Тип договора</th>
+                        <th>Дата окончания</th>
+                        <th>Дней осталось</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in contract_rows %}
+                        <tr>
+                            <td><a href="{% url 'employee_detail' row.contract.employee.pk %}">{{ row.contract.employee.full_name }}</a></td>
+                            <td>{{ row.contract.get_contract_type_display }}</td>
+                            <td>{{ row.contract.end_date|date:"d.m.Y" }}</td>
+                            <td><span class="badge badge-amber">{{ row.days_left }}</span></td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4" class="empty">Нет контрактов с окончанием в ближайшие 30 дней.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <aside class="panel">
+        <div class="panel-header">
+            <h2>Быстрые действия</h2>
+        </div>
+        <div class="action-stack">
+            <a class="btn primary" href="{% url 'campaign_create' %}">Создать кампанию</a>
+            <button class="btn secondary" type="button">Импорт сотрудников</button>
+            <a class="btn secondary" href="{% url 'employee_create' %}">Добавить сотрудника</a>
+        </div>
+    </aside>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <h2>Последние изменения</h2>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>Сотрудник</th>
+                    <th>Событие</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for change in recent_changes %}
+                    <tr>
+                        <td>{{ change.created_at|date:"d.m.Y H:i" }}</td>
+                        <td>
+                            {% if change.employee %}
+                                <a href="{% url 'employee_detail' change.employee.pk %}">{{ change.employee.full_name }}</a>
+                            {% else %}
+                                Система
+                            {% endif %}
+                        </td>
+                        <td>{{ change.event }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3" class="empty">Пока нет изменений.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+

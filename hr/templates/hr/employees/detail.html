@@ -1,0 +1,109 @@
+{% extends "hr/base.html" %}
+
+{% block title %}{{ employee.full_name }} - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Employee</p>
+        <h1>{{ employee.full_name }}</h1>
+        {% if employee.is_active %}
+            <span class="badge badge-green">в штате</span>
+        {% else %}
+            <span class="badge badge-red">уволен</span>
+        {% endif %}
+    </div>
+    <div class="header-actions">
+        <a class="btn secondary" href="{% url 'employee_edit' employee.pk %}">Редактировать</a>
+        {% if employee.is_active %}
+            <form method="post" action="{% url 'employee_terminate' employee.pk %}">
+                {% csrf_token %}
+                <button class="btn danger" type="submit">Уволить</button>
+            </form>
+        {% else %}
+            <form method="post" action="{% url 'employee_restore' employee.pk %}">
+                {% csrf_token %}
+                <button class="btn primary" type="submit">Вернуть в штат</button>
+            </form>
+        {% endif %}
+    </div>
+</section>
+
+<section class="detail-grid">
+    <div class="panel">
+        <div class="panel-header"><h2>Основная информация</h2></div>
+        <dl class="detail-list">
+            <dt>Email</dt><dd>{{ employee.email|default:"-" }}</dd>
+            <dt>Подразделение</dt><dd>{{ employee.department|default:"-" }}</dd>
+            <dt>Должность</dt><dd>{{ employee.position|default:"-" }}</dd>
+            <dt>Руководитель</dt><dd>{{ employee.manager.full_name|default:"-" }}</dd>
+            <dt>Дата найма</dt><dd>{{ employee.hire_date|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Дата увольнения</dt><dd>{{ employee.dismissal_date|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Статус ИПР</dt><dd><span class="status status-{{ employee.ipr_status }}">{{ employee.get_ipr_status_display }}</span></dd>
+        </dl>
+    </div>
+    <div class="panel">
+        <div class="panel-header"><h2>Оплата и договор</h2></div>
+        <dl class="detail-list">
+            <dt>Тип договора</dt><dd>{{ employee.get_contract_type_display|default:"-" }}</dd>
+            <dt>Дата окончания</dt><dd>{{ employee.contract_end_date|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Gross</dt><dd>{{ employee.salary_gross|default:"-" }} {{ employee.currency }}</dd>
+            <dt>Net</dt><dd>{{ employee.salary_net|default:"-" }} {{ employee.currency }}</dd>
+        </dl>
+    </div>
+</section>
+
+<section class="dashboard-grid">
+    <div class="panel">
+        <div class="panel-header"><h2>Договоры</h2></div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Тип</th><th>Дата окончания</th></tr></thead>
+                <tbody>
+                    {% for contract in contracts %}
+                        <tr><td>{{ contract.get_contract_type_display }}</td><td>{{ contract.end_date|date:"d.m.Y"|default:"-" }}</td></tr>
+                    {% empty %}
+                        <tr><td colspan="2" class="empty">Договоры не заведены.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="panel">
+        <div class="panel-header"><h2>Записи кампаний</h2></div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Кампания</th><th>Статус</th><th>Значение</th></tr></thead>
+                <tbody>
+                    {% for record in campaign_records %}
+                        <tr>
+                            <td><a href="{% url 'campaign_detail' record.campaign.pk %}">{{ record.campaign }}</a></td>
+                            <td>{{ record.get_status_display }}</td>
+                            <td>{{ record.value|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="3" class="empty">Нет записей кампаний.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-header"><h2>История изменений</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Дата</th><th>Событие</th></tr></thead>
+            <tbody>
+                {% for change in changes %}
+                    <tr><td>{{ change.created_at|date:"d.m.Y H:i" }}</td><td>{{ change.event }}</td></tr>
+                {% empty %}
+                    <tr><td colspan="2" class="empty">История пока пустая.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+

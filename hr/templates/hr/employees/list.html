@@ -1,0 +1,133 @@
+{% extends "hr/base.html" %}
+
+{% block title %}Сотрудники - HR Control Panel{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Employees</p>
+        <h1>Сотрудники</h1>
+    </div>
+    <div class="header-actions">
+        <button class="btn secondary" type="button">Колонки</button>
+        <button class="btn secondary" type="button">Экспорт</button>
+        <button class="btn secondary" type="button">Импорт</button>
+        <a class="btn primary" href="{% url 'employee_create' %}">Создать сотрудника</a>
+    </div>
+</section>
+
+<form class="filters" method="get">
+    <label>
+        <span>Поиск</span>
+        <input class="form-control" type="search" name="q" value="{{ filters.q }}" placeholder="Имя, фамилия или email">
+    </label>
+    <label>
+        <span>Подразделение</span>
+        <select class="form-control" name="department">
+            <option value="">Все</option>
+            {% for department in departments %}
+                <option value="{{ department.id }}" {% if filters.department == department.id|stringformat:"s" %}selected{% endif %}>{{ department.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>
+        <span>Должность</span>
+        <select class="form-control" name="position">
+            <option value="">Все</option>
+            {% for position in positions %}
+                <option value="{{ position.id }}" {% if filters.position == position.id|stringformat:"s" %}selected{% endif %}>{{ position.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>
+        <span>Статус ИПР</span>
+        <select class="form-control" name="ipr_status">
+            <option value="">Все</option>
+            {% for value, label in ipr_status_choices %}
+                <option value="{{ value }}" {% if filters.ipr_status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label class="checkbox-row">
+        <input type="checkbox" name="show_inactive" value="1" {% if filters.show_inactive %}checked{% endif %}>
+        <span>Показывать уволенных</span>
+    </label>
+    <button class="btn primary" type="submit">Применить</button>
+    <a class="btn ghost" href="{% url 'employees_list' %}">Сбросить</a>
+</form>
+
+<section class="content-with-sidebar">
+    <div class="panel">
+        <div class="table-wrap employee-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th><input data-select-all="employee-row" type="checkbox"></th>
+                        <th>ФИО</th>
+                        <th>Подразделение</th>
+                        <th>Должность</th>
+                        <th>Руководитель</th>
+                        <th>Статус ИПР</th>
+                        <th>Тип договора</th>
+                        <th>Gross</th>
+                        <th>Net</th>
+                        <th>Валюта</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for employee in employees %}
+                        <tr>
+                            <td><input data-checkbox-group="employee-row" type="checkbox"></td>
+                            <td>
+                                <a class="table-main-link" href="{% url 'employee_detail' employee.pk %}">{{ employee.full_name }}</a>
+                                {% if not employee.is_active %}<span class="badge badge-red">уволен</span>{% endif %}
+                                {% if not employee.email %}<span class="muted small">без email</span>{% endif %}
+                            </td>
+                            <td>{{ employee.department|default:"Без подразделения" }}</td>
+                            <td>{{ employee.position|default:"Без должности" }}</td>
+                            <td>{{ employee.manager.full_name|default:"-" }}</td>
+                            <td><span class="status status-{{ employee.ipr_status }}">{{ employee.get_ipr_status_display }}</span></td>
+                            <td>{{ employee.get_contract_type_display|default:"-" }}</td>
+                            <td>{{ employee.salary_gross|default:"-" }}</td>
+                            <td>{{ employee.salary_net|default:"-" }}</td>
+                            <td>{{ employee.currency }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="10" class="empty">Сотрудники не найдены.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <aside class="panel summary-panel">
+        <div class="panel-header">
+            <h2>Сводка по выборке</h2>
+        </div>
+        <div class="summary-list">
+            <div><span>Численность</span><strong>{{ summary.count }}</strong></div>
+            <div><span>Без зарплаты</span><strong>{{ summary.missing_salary_count }}</strong></div>
+        </div>
+        <div class="summary-breakdown">
+            {% for row in payroll_by_currency %}
+                <div class="currency-block">
+                    <h3>{{ row.currency }}</h3>
+                    <dl>
+                        <dt>ФОТ gross</dt>
+                        <dd>{{ row.gross_total|default:0|floatformat:0 }}</dd>
+                        <dt>ФОТ net</dt>
+                        <dd>{{ row.net_total|default:0|floatformat:0 }}</dd>
+                        <dt>Средняя gross</dt>
+                        <dd>{{ row.gross_avg|default:0|floatformat:0 }}</dd>
+                        <dt>Средняя net</dt>
+                        <dd>{{ row.net_avg|default:0|floatformat:0 }}</dd>
+                    </dl>
+                </div>
+            {% empty %}
+                <p class="empty">Нет данных для расчёта.</p>
+            {% endfor %}
+        </div>
+    </aside>
+</section>
+{% endblock %}
+
