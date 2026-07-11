@@ -14,6 +14,9 @@ python manage.py seed_demo_data
 python manage.py runserver
 ```
 
+> `seed_demo_data` полностью пересоздаёт демонстрационные HR-данные и демо-пользователей.
+> Не запускайте команду поверх рабочей базы.
+
 После запуска откройте http://127.0.0.1:8000/.
 
 Если используется не Windows, команды отличаются только активацией окружения:
@@ -74,11 +77,15 @@ set DJANGO_DEBUG=0
 set DJANGO_ALLOWED_HOSTS=example.com,www.example.com
 set DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com,https://www.example.com
 set DJANGO_SECURE_SSL_REDIRECT=1
+set DJANGO_USE_X_FORWARDED_PROTO=1
 set DJANGO_SESSION_COOKIE_SECURE=1
 set DJANGO_CSRF_COOKIE_SECURE=1
 set DJANGO_SECURE_HSTS_SECONDS=31536000
 python manage.py collectstatic
 ```
+
+`DJANGO_USE_X_FORWARDED_PROTO=1` нужен только за доверенным reverse proxy, который
+сам устанавливает и очищает заголовок `X-Forwarded-Proto`.
 
 ## Тесты
 

@@ -11,7 +11,21 @@
     </div>
 </section>
 
-{% if page == "positions" %}
+{% if page == "guide" %}
+    <section class="panel">
+        <h2>Быстрый старт</h2>
+        <ol class="guide-list">
+            <li>Создайте подразделения и должности в меню «Ещё».</li>
+            <li>Добавьте сотрудников вручную или загрузите Excel в разделе «Сотрудники».</li>
+            <li>Проверьте договоры, испытательные сроки и ИПР на главной и в календаре.</li>
+            <li>Создайте кампанию, добавьте участников и проводите записи по статусам.</li>
+        </ol>
+        <h2>Роли и доступ</h2>
+        <p><strong>HR Admin</strong> управляет всей системой; <strong>HR Manager</strong> ведёт HR-данные; <strong>HR Viewer</strong> работает только на чтение; <strong>HRBP</strong> ограничен назначенными подразделениями; <strong>Line Manager</strong> видит себя и прямых подчинённых.</p>
+        <h2>Импорт без сюрпризов</h2>
+        <p>Сначала скачайте шаблон, затем загрузите заполненный .xlsx. Система покажет создаваемые и изменяемые записи до подтверждения. Один файл — не более 5 МБ и 5000 строк.</p>
+    </section>
+{% elif page == "positions" %}
     <section class="panel">
         <div class="table-wrap">
             <table>
@@ -26,19 +40,48 @@
             </table>
         </div>
     </section>
-{% elif page == "data_audit" or page == "action_log" %}
+{% elif page == "data_audit" %}
     <section class="panel">
         <div class="table-wrap">
             <table>
-                <thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Событие</th><th>IP</th></tr></thead>
+                <thead><tr><th>Дата</th><th>Пользователь</th><th>Объект</th><th>Изменения</th><th>Событие</th></tr></thead>
+                <tbody>
+                    {% for entry in audit_entries %}
+                        <tr>
+                            <td>{{ entry.log.created_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ entry.log.actor.username|default:"Система" }}</td>
+                            <td>{{ entry.log.model_name }}{% if entry.log.object_id %} #{{ entry.log.object_id }}{% endif %}</td>
+                            <td>
+                                <div class="diff-list">
+                                    {% for diff in entry.diffs %}
+                                        <span><strong>{{ diff.label }}:</strong> {{ diff.before }} → {{ diff.after }}</span>
+                                    {% empty %}
+                                        <span class="muted">Снимок полей отсутствует</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            <td>{{ entry.log.event }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="5" class="empty">Изменений данных пока нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% elif page == "action_log" %}
+    <section class="panel">
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Событие</th><th>Путь</th><th>IP</th></tr></thead>
                 <tbody>
                     {% for log in audit_logs %}
                         <tr>
                             <td>{{ log.created_at|date:"d.m.Y H:i" }}</td>
                             <td>{{ log.actor.username|default:"Система" }}</td>
                             <td>{{ log.get_action_display }}</td>
-                            <td>{{ log.model_name }}{% if log.object_id %} #{{ log.object_id }}{% endif %}</td>
                             <td>{{ log.event }}</td>
+                            <td>{{ log.path|default:"-" }}</td>
                             <td>{{ log.ip_address|default:"-" }}</td>
                         </tr>
                     {% empty %}
@@ -78,8 +121,8 @@
     </section>
 {% else %}
     <section class="panel empty-state">
-        <h2>Базовая структура раздела готова</h2>
-        <p>На следующем этапе здесь можно добавить справочники, права доступа, шаблоны и рабочие процессы.</p>
+        <h2>Раздел недоступен</h2>
+        <p>Для этого раздела пока нет содержимого.</p>
     </section>
 {% endif %}
 {% endblock %}

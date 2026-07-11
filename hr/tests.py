@@ -14,6 +14,7 @@ from .models import (
     Employee,
     EmployeeColumnPreference,
     Position,
+    Probation,
     UserDepartmentAccess,
 )
 
@@ -98,6 +99,44 @@ class HrFeatureTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("/accounts/login/", response["Location"])
+
+    def test_successful_login_is_audited(self):
+        self.assertTrue(self.client.login(username="viewer", password="Test12345!"))
+        log = AuditLog.objects.filter(action=AuditLog.ACTION_LOGIN).latest("created_at")
+        self.assertEqual(log.actor, self.viewer)
+        self.assertEqual(log.event, "Успешный вход в систему")
+
+    def test_data_audit_and_action_log_have_distinct_events(self):
+        permission = Permission.objects.get(
+            content_type__app_label="hr",
+            content_type__model="auditlog",
+            codename="view_auditlog",
+        )
+        self.manager.user_permissions.add(permission)
+        AuditLog.objects.create(
+            actor=self.manager,
+            action=AuditLog.ACTION_UPDATE,
+            model_name="Employee",
+            object_id=str(self.employee.pk),
+            event="Изменена фамилия",
+            before={"last_name": "Старов"},
+            after={"last_name": "Новов"},
+        )
+        AuditLog.objects.create(
+            actor=self.manager,
+            action=AuditLog.ACTION_EXPORT,
+            event="Экспорт тестовых данных",
+            path="/employees/export/",
+        )
+        self.client.force_login(self.manager)
+
+        data_response = self.client.get("/data-audit/")
+        action_response = self.client.get("/action-log/")
+
+        self.assertContains(data_response, "Изменена фамилия")
+        self.assertNotContains(data_response, "Экспорт тестовых данных")
+        self.assertContains(action_response, "Экспорт тестовых данных")
+        self.assertNotContains(action_response, "Изменена фамилия")
 
     def test_viewer_cannot_create_employee(self):
         self.client.force_login(self.viewer)
@@ -274,6 +313,55 @@ class HrFeatureTests(TestCase):
         self.assertEqual(response.status_code, 302)
         record.refresh_from_db()
         self.assertEqual(record.status, CampaignRecord.STATUS_HR_APPROVED)
+
+    def test_hrbp_cannot_import_or_change_probation_outside_scope(self):
+        group = Group.objects.create(name="HRBP")
+        hrbp = make_user(
+            "restricted_hrbp",
+            hr_perms=["view_employee", "add_employee", "change_employee", "change_probation"],
+        )
+        hrbp.groups.add(group)
+        UserDepartmentAccess.objects.create(user=hrbp, department=self.department)
+        outside_department = Department.objects.create(name="Outside HRBP")
+        outside_employee = Employee.objects.create(
+            first_name="Outside",
+            last_name="Person",
+            department=outside_department,
+            is_active=True,
+            ipr_status=Employee.IPR_NONE,
+            currency="RUB",
+        )
+        probation = Probation.objects.create(
+            employee=outside_employee,
+            start_date="2026-06-01",
+            end_date="2026-09-01",
+        )
+
+        self.client.force_login(hrbp)
+        self.assertEqual(self.client.get("/employees/import/").status_code, 403)
+        response = self.client.post(f"/probation/{probation.pk}/toggle/week_1_done/")
+        self.assertEqual(response.status_code, 403)
+        probation.refresh_from_db()
+        self.assertFalse(probation.week_1_done)
+
+    def test_closed_campaign_rejects_record_changes(self):
+        self.client.force_login(self.directory_admin)
+        campaign = Campaign.objects.create(
+            season="Закрытая",
+            year=2026,
+            status=Campaign.STATUS_CLOSED,
+            start_date="2026-06-01",
+        )
+        record = CampaignRecord.objects.create(campaign=campaign, employee=self.employee)
+
+        response = self.client.post(
+            f"/campaigns/{campaign.pk}/records/{record.pk}/status/",
+            {"status": CampaignRecord.STATUS_DONE},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        self.assertEqual(record.status, CampaignRecord.STATUS_ACTIVE)
 
     def _build_import_file(self, rows):
         workbook = Workbook()

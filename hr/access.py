@@ -3,13 +3,24 @@ from django.db.models import Q
 from .models import Department, Employee
 
 
+GLOBAL_EMPLOYEE_SCOPE_GROUPS = ["HR Admin", "HR Manager", "HR Viewer"]
+
+
+def user_has_global_employee_scope(user):
+    if not user.is_authenticated:
+        return False
+    if user.is_superuser or user.groups.filter(name__in=GLOBAL_EMPLOYEE_SCOPE_GROUPS).exists():
+        return True
+    if user.groups.filter(name__in=["HRBP", "Line Manager"]).exists():
+        return False
+    return user.has_perm("hr.view_employee")
+
+
 def scoped_employee_queryset(user, queryset=None):
     queryset = queryset or Employee.objects.all()
     if not user.is_authenticated:
         return queryset.none()
-    if user.is_superuser or user.groups.filter(name="HR Admin").exists():
-        return queryset
-    if user.groups.filter(name__in=["HR Manager", "HR Viewer"]).exists():
+    if user_has_global_employee_scope(user):
         return queryset
 
     department_ids = _accessible_department_ids(user)
@@ -32,6 +43,12 @@ def scoped_employee_queryset(user, queryset=None):
 
 def user_can_access_employee(user, employee):
     return scoped_employee_queryset(user, Employee.objects.filter(pk=employee.pk)).exists()
+
+
+def accessible_department_ids(user):
+    if user_has_global_employee_scope(user):
+        return set(Department.objects.values_list("id", flat=True))
+    return _accessible_department_ids(user)
 
 
 def _accessible_department_ids(user):

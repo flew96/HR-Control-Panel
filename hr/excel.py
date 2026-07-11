@@ -67,7 +67,7 @@ def build_employee_workbook(employees, include_rows=True):
 
 
 def preview_employees_from_xlsx(file_obj):
-    workbook = load_workbook(filename=file_obj, data_only=True)
+    workbook = load_workbook(filename=file_obj, data_only=True, read_only=True)
     worksheet = workbook.active
     rows = worksheet.iter_rows(values_only=True)
     try:
@@ -81,6 +81,9 @@ def preview_employees_from_xlsx(file_obj):
 
     result = _empty_import_result()
     for row_number, raw_row in enumerate(rows, start=2):
+        if row_number > 5001:
+            result["errors"].append("Файл содержит больше 5000 строк. Разделите импорт на части.")
+            break
         if not raw_row or not any(_has_value(value) for value in raw_row):
             result["skipped"] += 1
             continue

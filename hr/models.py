@@ -247,6 +247,12 @@ class CampaignRecord(models.Model):
 
     class Meta:
         ordering = ["employee__last_name", "employee__first_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campaign", "employee"],
+                name="unique_campaign_employee_record",
+            )
+        ]
 
     def __str__(self):
         return f"{self.campaign}: {self.employee}"

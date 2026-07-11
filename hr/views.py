@@ -15,7 +15,11 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .access import scoped_employee_queryset, user_can_access_employee
+from .access import (
+    scoped_employee_queryset,
+    user_can_access_employee,
+    user_has_global_employee_scope,
+)
 from .audit import audit_logs_with_diffs, snapshot_instance, write_audit_log
 from .columns import (
     EMPLOYEE_COLUMNS,
@@ -87,7 +91,7 @@ PROBATION_STAGE_FIELDS = {
 SIMPLE_PAGES = {
     "guide": {
         "title": "Руководство",
-        "description": "Короткий раздел для будущей базы знаний HR-процессов.",
+        "description": "Быстрый старт, роли и безопасная работа с HR-данными.",
     },
     "positions": {
         "title": "Должности",
@@ -103,11 +107,11 @@ SIMPLE_PAGES = {
     },
     "data_audit": {
         "title": "Аудит-лог данных",
-        "description": "Строгий журнал изменений с пользователем, объектом и снимками данных.",
+        "description": "Изменения HR-сущностей: кто, когда и какие поля поменял.",
     },
     "action_log": {
         "title": "Журнал действий",
-        "description": "Последние действия пользователей в системе.",
+        "description": "Системные операции: входы, импорты, экспорты и служебные действия.",
     },
 }
 
@@ -187,7 +191,10 @@ def dashboard(request):
         },
         {
             "label": "Открытые кампании",
-            "value": Campaign.objects.filter(status=Campaign.STATUS_OPEN).count(),
+            "value": Campaign.objects.filter(
+                status=Campaign.STATUS_OPEN,
+                records__employee_id__in=visible_employee_ids,
+            ).distinct().count(),
             "accent": "green",
         },
         {
@@ -195,12 +202,19 @@ def dashboard(request):
             "value": CampaignRecord.objects.filter(
                 campaign__status=Campaign.STATUS_OPEN,
                 status=CampaignRecord.STATUS_ACTIVE,
+                employee_id__in=visible_employee_ids,
             ).count(),
             "accent": "violet",
         },
     ]
 
-    recent_changes = AuditLog.objects.select_related("actor").order_by("-created_at")[:8]
+    recent_changes = AuditLog.objects.select_related("actor")
+    if not user_has_global_employee_scope(request.user):
+        recent_changes = recent_changes.filter(
+            model_name="Employee",
+            object_id__in=[str(pk) for pk in visible_employee_ids.values_list("id", flat=True)],
+        )
+    recent_changes = recent_changes.order_by("-created_at")[:8]
 
     return render(
         request,
@@ -332,7 +346,7 @@ def employee_detail(request, pk):
 @permission_required("hr.add_employee", raise_exception=True)
 def employee_create(request):
     if request.method == "POST":
-        form = EmployeeForm(request.POST)
+        form = EmployeeForm(request.POST, user=request.user)
         if form.is_valid():
             employee = form.save()
             write_audit_log(
@@ -346,7 +360,7 @@ def employee_create(request):
             messages.success(request, "Сотрудник создан.")
             return redirect("employee_detail", pk=employee.pk)
     else:
-        form = EmployeeForm()
+        form = EmployeeForm(user=request.user)
 
     return render(
         request,
@@ -361,7 +375,7 @@ def employee_edit(request, pk):
     employee = get_object_or_404(_employee_queryset(request), pk=pk)
     before = snapshot_instance(employee)
     if request.method == "POST":
-        form = EmployeeForm(request.POST, instance=employee)
+        form = EmployeeForm(request.POST, instance=employee, user=request.user)
         if form.is_valid():
             employee = form.save()
             write_audit_log(
@@ -376,7 +390,7 @@ def employee_edit(request, pk):
             messages.success(request, "Изменения сохранены.")
             return redirect("employee_detail", pk=employee.pk)
     else:
-        form = EmployeeForm(instance=employee)
+        form = EmployeeForm(instance=employee, user=request.user)
 
     return render(
         request,
@@ -453,6 +467,8 @@ def employees_export(request):
 @login_required
 @permission_required(("hr.add_employee", "hr.change_employee"), raise_exception=True)
 def employees_import(request):
+    if not user_has_global_employee_scope(request.user):
+        raise PermissionDenied
     result = None
     preview = request.session.get("employee_import_preview")
     if request.method == "POST":
@@ -484,6 +500,8 @@ def employees_import(request):
                 messages.error(request, "Выберите файл .xlsx для предпросмотра.")
             elif not upload.name.lower().endswith(".xlsx"):
                 messages.error(request, "Поддерживается только формат .xlsx.")
+            elif upload.size > 5 * 1024 * 1024:
+                messages.error(request, "Файл слишком большой. Максимальный размер — 5 МБ.")
             else:
                 try:
                     preview = preview_employees_from_xlsx(upload)
@@ -609,6 +627,8 @@ def probation_toggle_stage(request, pk, field):
         return redirect("probation_list")
 
     probation = get_object_or_404(Probation.objects.select_related("employee"), pk=pk)
+    if not user_can_access_employee(request.user, probation.employee):
+        raise PermissionDenied
     before = snapshot_instance(probation)
     setattr(probation, field, not getattr(probation, field))
     probation.save(update_fields=[field])
@@ -629,6 +649,8 @@ def probation_toggle_stage(request, pk, field):
 @require_POST
 def probation_set_result(request, pk):
     probation = get_object_or_404(Probation.objects.select_related("employee"), pk=pk)
+    if not user_can_access_employee(request.user, probation.employee):
+        raise PermissionDenied
     before = snapshot_instance(probation)
     result = request.POST.get("result")
     if result not in [Probation.RESULT_PASSED, Probation.RESULT_FAILED]:
@@ -993,7 +1015,7 @@ def campaign_detail(request, pk):
         "employee__department",
         "employee__position",
     ).filter(employee_id__in=visible_employee_ids)
-    form = CampaignRecordForm()
+    form = CampaignRecordForm(employee_queryset=_employee_queryset(request).filter(is_active=True))
     return render(
         request,
         "hr/campaigns/detail.html",
@@ -1012,11 +1034,20 @@ def campaign_detail(request, pk):
 @require_POST
 def campaign_record_add(request, pk):
     campaign = get_object_or_404(Campaign, pk=pk)
-    form = CampaignRecordForm(request.POST)
+    if campaign.status == Campaign.STATUS_CLOSED:
+        messages.error(request, "Закрытую кампанию сначала нужно переоткрыть.")
+        return redirect("campaign_detail", pk=campaign.pk)
+    form = CampaignRecordForm(
+        request.POST,
+        employee_queryset=_employee_queryset(request).filter(is_active=True),
+    )
     if form.is_valid():
         record = form.save(commit=False)
         if not user_can_access_employee(request.user, record.employee):
             raise PermissionDenied
+        if campaign.records.filter(employee=record.employee).exists():
+            messages.error(request, "Сотрудник уже добавлен в эту кампанию.")
+            return redirect("campaign_detail", pk=campaign.pk)
         record.campaign = campaign
         record.save()
         write_audit_log(
@@ -1038,6 +1069,9 @@ def campaign_record_add(request, pk):
 @require_POST
 def campaign_records_bulk_add(request, pk):
     campaign = get_object_or_404(Campaign, pk=pk)
+    if campaign.status == Campaign.STATUS_CLOSED:
+        messages.error(request, "Закрытую кампанию сначала нужно переоткрыть.")
+        return redirect("campaign_detail", pk=campaign.pk)
     employees = _employee_queryset(request).filter(is_active=True)
     department_id = request.POST.get("department")
     if department_id:
@@ -1070,6 +1104,9 @@ def campaign_records_bulk_add(request, pk):
 @require_POST
 def campaign_record_status_update(request, pk, record_pk):
     campaign = get_object_or_404(Campaign, pk=pk)
+    if campaign.status == Campaign.STATUS_CLOSED:
+        messages.error(request, "Статусы закрытой кампании изменять нельзя.")
+        return redirect("campaign_detail", pk=campaign.pk)
     record = get_object_or_404(campaign.records.select_related("employee"), pk=record_pk)
     if not user_can_access_employee(request.user, record.employee):
         raise PermissionDenied
@@ -1341,6 +1378,24 @@ def simple_page(request, page):
         context["positions"] = Position.objects.annotate(employee_count=Count("employees"))
     if page == "users":
         context["users"] = get_user_model().objects.prefetch_related("groups").order_by("username")
-    if page in ["data_audit", "action_log"]:
-        context["audit_logs"] = AuditLog.objects.select_related("actor")[:50]
+    if page == "data_audit":
+        audit_logs = AuditLog.objects.select_related("actor").filter(
+            action__in=[AuditLog.ACTION_CREATE, AuditLog.ACTION_UPDATE, AuditLog.ACTION_DELETE]
+        )
+        if not user_has_global_employee_scope(request.user):
+            visible_ids = [str(pk) for pk in _employee_queryset(request).values_list("id", flat=True)]
+            audit_logs = audit_logs.filter(model_name="Employee", object_id__in=visible_ids)
+        context["audit_entries"] = audit_logs_with_diffs(audit_logs[:50])
+    if page == "action_log":
+        audit_logs = AuditLog.objects.select_related("actor").filter(
+            action__in=[
+                AuditLog.ACTION_LOGIN,
+                AuditLog.ACTION_IMPORT,
+                AuditLog.ACTION_EXPORT,
+                AuditLog.ACTION_OTHER,
+            ]
+        )
+        if not user_has_global_employee_scope(request.user):
+            audit_logs = audit_logs.filter(actor=request.user)
+        context["audit_logs"] = audit_logs[:50]
     return render(request, "hr/simple_page.html", context)
