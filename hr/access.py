@@ -17,7 +17,8 @@ def user_has_global_employee_scope(user):
 
 
 def scoped_employee_queryset(user, queryset=None):
-    queryset = queryset or Employee.objects.all()
+    if queryset is None:
+        queryset = Employee.objects.all()
     if not user.is_authenticated:
         return queryset.none()
     if user_has_global_employee_scope(user):

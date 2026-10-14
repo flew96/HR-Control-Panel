@@ -7,7 +7,8 @@
     <title>{% block title %}HR Control Panel{% endblock %}</title>
     <script>
         (() => {
-            const savedTheme = localStorage.getItem("hr-theme");
+            let savedTheme;
+            try { savedTheme = localStorage.getItem("hr-theme"); } catch {}
             const theme = savedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
             document.documentElement.dataset.theme = theme;
         })();
@@ -15,17 +16,18 @@
     <link rel="stylesheet" href="{% static 'hr/css/styles.css' %}?v=2">
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Перейти к содержимому</a>
     <header class="topbar">
         <a class="brand" href="{% url 'dashboard' %}">HR Control Panel</a>
-        <nav class="nav">
+        <nav class="nav" aria-label="Основная навигация">
             <a href="{% url 'dashboard' %}">Главная</a>
             <a href="{% url 'employees_list' %}">Сотрудники</a>
             <a href="{% url 'probation_list' %}">Испытательный срок</a>
             <a href="{% url 'departments_list' %}">Подразделения</a>
             <a href="{% url 'calendar' %}">Календарь</a>
             <a href="{% url 'campaigns_list' %}">Кампании</a>
-            <div class="dropdown">
-                <button class="dropdown-toggle" type="button">Ещё</button>
+            <details class="dropdown">
+                <summary class="dropdown-toggle">Ещё</summary>
                 <div class="dropdown-menu">
                     <a href="{% url 'guide' %}">Руководство</a>
                     <a href="{% url 'positions' %}">Должности</a>
@@ -37,7 +39,7 @@
                     <a href="{% url 'data_audit' %}">Аудит-лог данных</a>
                     <a href="{% url 'action_log' %}">Журнал действий</a>
                 </div>
-            </div>
+            </details>
             {% if request.user.is_authenticated %}
                 <div class="user-menu">
                     <button class="theme-toggle" type="button" data-theme-toggle aria-label="Включить тёмную тему" title="Переключить тему">
@@ -54,9 +56,9 @@
         </nav>
     </header>
 
-    <main class="page-shell">
+    <main class="page-shell" id="main-content" tabindex="-1">
         {% if messages %}
-            <div class="messages">
+            <div class="messages" role="status" aria-live="polite">
                 {% for message in messages %}
                     <div class="message {{ message.tags }}">{{ message }}</div>
                 {% endfor %}

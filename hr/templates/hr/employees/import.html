@@ -19,7 +19,7 @@
     {% csrf_token %}
     <input type="hidden" name="action" value="preview">
     <label>
-        <span>Файл .xlsx</span>
+        <span>Файл .xlsx (до 5 МБ, до 5000 строк)</span>
         <input class="form-control" type="file" name="file" accept=".xlsx" required>
     </label>
     <div class="form-actions">
@@ -46,7 +46,8 @@
             <article class="stat-card accent-red"><span>Ошибки</span><strong>{{ preview.errors|length }}</strong></article>
         </div>
         {% if preview.errors %}
-            <div class="import-errors">
+            <p>Импорт недоступен: исправьте ошибки и загрузите файл заново. Данные ещё не сохранены.</p>
+            <div class="import-errors" role="alert">
                 {% for error in preview.errors %}
                     <div>{{ error }}</div>
                 {% endfor %}
@@ -64,7 +65,7 @@
                             <td>{{ operation.email|default:"-" }}</td>
                             <td>
                                 <div class="diff-list">
-                                    {% for change in operation.changes|slice:":8" %}
+                                    {% for change in operation.changes %}
                                         <span>{{ change.field }}: {{ change.before }} -> {{ change.after }}</span>
                                     {% empty %}
                                         <span>Нет изменений</span>
@@ -91,7 +92,7 @@
             <article class="stat-card accent-red"><span>Ошибки</span><strong>{{ result.errors|length }}</strong></article>
         </div>
         {% if result.errors %}
-            <div class="import-errors">
+            <div class="import-errors" role="alert">
                 {% for error in result.errors %}
                     <div>{{ error }}</div>
                 {% endfor %}

@@ -12,6 +12,7 @@
 
 <form class="panel form-panel" method="post">
     {% csrf_token %}
+    {{ form.non_field_errors }}
     <div class="form-grid">
         {% for field in form %}
             <label class="{% if field.field.widget.input_type == 'checkbox' %}checkbox-row form-checkbox{% endif %}">

@@ -55,6 +55,10 @@ def build_employee_workbook(employees, include_rows=True):
     if include_rows:
         for employee in employees:
             worksheet.append(_employee_row(employee))
+            # Employee text must remain text, even when it starts with '='.
+            for cell in worksheet[worksheet.max_row]:
+                if cell.data_type == "f":
+                    cell.data_type = "s"
 
     widths = [10, 20, 18, 18, 28, 26, 26, 28, 14, 14, 22, 12, 18, 22, 22, 14, 14, 10]
     for index, width in enumerate(widths, start=1):
@@ -369,7 +373,10 @@ def _parse_decimal(value):
     if not _has_value(value):
         return None
     try:
-        return Decimal(str(value).replace(",", "."))
+        number = Decimal(str(value).replace(",", "."))
+        if not number.is_finite() or number < 0:
+            raise ValueError(f"сумма должна быть конечным неотрицательным числом: {value}.")
+        return number
     except InvalidOperation as exc:
         raise ValueError(f"некорректное число: {value}.") from exc
 

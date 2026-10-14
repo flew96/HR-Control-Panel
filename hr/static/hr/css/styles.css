@@ -192,8 +192,7 @@ a:hover {
     box-shadow: var(--shadow);
 }
 
-.dropdown:hover .dropdown-menu,
-.dropdown:focus-within .dropdown-menu {
+.dropdown[open] .dropdown-menu {
     display: block;
 }
 
@@ -305,6 +304,7 @@ a:hover {
 }
 
 .panel {
+    min-width: 0;
     padding: 18px;
     margin-bottom: 18px;
 }
@@ -964,12 +964,18 @@ dd {
     }
 
     .nav {
-        overflow-x: auto;
+        flex-wrap: wrap;
         padding-bottom: 4px;
     }
 
     .dropdown {
         margin-left: 0;
+    }
+
+    .dropdown-menu {
+        left: 0;
+        right: auto;
+        z-index: 20;
     }
 
     .page-shell {
@@ -993,3 +999,8 @@ dd {
         grid-template-columns: repeat(7, minmax(130px, 1fr));
     }
 }
+
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.skip-link { position: absolute; left: 12px; top: -100px; padding: 12px; background: var(--surface); z-index: 100; }
+.skip-link:focus { top: 12px; }
+.dropdown-menu { z-index: 20; }

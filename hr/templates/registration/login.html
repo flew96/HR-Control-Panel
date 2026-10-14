@@ -7,7 +7,8 @@
     <title>Вход - HR Control Panel</title>
     <script>
         (() => {
-            const savedTheme = localStorage.getItem("hr-theme");
+            let savedTheme;
+            try { savedTheme = localStorage.getItem("hr-theme"); } catch {}
             const theme = savedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
             document.documentElement.dataset.theme = theme;
         })();

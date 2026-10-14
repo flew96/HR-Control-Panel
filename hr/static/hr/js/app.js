@@ -21,7 +21,7 @@ document.addEventListener("click", (event) => {
         return;
     }
     const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    localStorage.setItem("hr-theme", theme);
+    try { localStorage.setItem("hr-theme", theme); } catch {}
     applyTheme(theme);
 });
 

@@ -397,3 +397,76 @@ class HrFeatureTests(TestCase):
             output.read(),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+
+class ReviewRegressionTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = make_user("review_manager", hr_perms=["view_employee", "add_employee", "change_employee"])
+        cls.employee = Employee.objects.create(first_name="Иван", last_name="Тестов")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_empty_employee_scope_is_not_replaced(self):
+        from .access import scoped_employee_queryset
+
+        for queryset in (Employee.objects.none(), Employee.objects.filter(pk=-1)):
+            with self.subTest(queryset=queryset.query.is_empty()):
+                self.assertFalse(scoped_employee_queryset(self.user, queryset).exists())
+
+    def test_return_urls_stay_on_this_site(self):
+        paths = ["/employees/columns/", f"/employees/{self.employee.pk}/terminate/", f"/employees/{self.employee.pk}/restore/"]
+        for path in paths:
+            for target in ("https://example.org/", "//example.org/", "javascript:alert(1)"):
+                with self.subTest(path=path, target=target):
+                    response = self.client.post(path, {"next": target})
+                    self.assertEqual(response.status_code, 302)
+                    self.assertTrue(response["Location"].startswith("/employees/"))
+            response = self.client.post(path, {"next": "/employees/?q=test"})
+            self.assertEqual(response["Location"], "/employees/?q=test")
+
+    def test_import_confirmation_rejects_errors_and_missing_preview(self):
+        for preview in (None, {"errors": ["Invalid row"]}):
+            session = self.client.session
+            session["employee_import_preview"] = preview
+            session["employee_import_rows"] = [{"first_name": "Unexpected", "last_name": "Import"}]
+            session.save()
+            response = self.client.post("/employees/import/", {"action": "confirm"})
+            self.assertContains(response, "Сначала загрузите файл")
+            self.assertEqual(Employee.objects.count(), 1)
+            self.assertFalse(AuditLog.objects.filter(action=AuditLog.ACTION_IMPORT).exists())
+
+    def test_invalid_upload_discards_previous_preview(self):
+        session = self.client.session
+        session["employee_import_preview"] = {"errors": [], "operations": ["old"]}
+        session["employee_import_rows"] = [{"first_name": "Old", "last_name": "Upload"}]
+        session.save()
+        self.client.post("/employees/import/", {"file": SimpleUploadedFile("wrong.txt", b"wrong")})
+        self.client.post("/employees/import/", {"action": "confirm"})
+        self.assertNotIn("employee_import_rows", self.client.session)
+        self.assertEqual(Employee.objects.count(), 1)
+
+    def test_excel_export_preserves_formula_like_text(self):
+        from .excel import build_employee_workbook
+
+        self.employee.last_name = '=HYPERLINK("https://example.org", "Name")'
+        workbook = load_workbook(BytesIO(build_employee_workbook([self.employee])))
+        cell = workbook.active["B2"]
+        self.assertEqual(cell.value, self.employee.last_name)
+        self.assertEqual(cell.data_type, "s")
+
+    def test_import_preview_rejects_invalid_salary(self):
+        from .excel import preview_employees_from_xlsx
+
+        for salary in ("NaN", "Infinity", "-1"):
+            with self.subTest(salary=salary):
+                workbook = Workbook()
+                workbook.active.append(["first_name", "last_name", "salary_gross"])
+                workbook.active.append(["Иван", "Тестов", salary])
+                output = BytesIO()
+                workbook.save(output)
+                output.seek(0)
+                result = preview_employees_from_xlsx(output)
+                self.assertEqual(len(result["errors"]), 1)
+                self.assertEqual(result["rows"], [])

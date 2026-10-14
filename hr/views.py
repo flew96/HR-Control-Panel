@@ -13,6 +13,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from .access import (
@@ -132,6 +133,15 @@ REFERENCE_DIRECTORY_CONFIG = {
         "description": "Справочник типов событий для будущего расширения календаря.",
     },
 }
+
+
+def _redirect_after_post(request, fallback):
+    target = request.POST.get("next", "")
+    if not url_has_allowed_host_and_scheme(
+        target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        target = fallback
+    return redirect(target)
 
 
 def _querystring_without(request, *excluded_keys):
@@ -418,7 +428,7 @@ def employee_terminate(request, pk):
         employee=employee,
     )
     messages.warning(request, "Сотрудник переведён в статус уволенного.")
-    return redirect(request.POST.get("next") or reverse("employee_detail", args=[employee.pk]))
+    return _redirect_after_post(request, reverse("employee_detail", args=[employee.pk]))
 
 
 @login_required
@@ -440,7 +450,7 @@ def employee_restore(request, pk):
         employee=employee,
     )
     messages.success(request, "Сотрудник возвращён в штат.")
-    return redirect(request.POST.get("next") or reverse("employee_detail", args=[employee.pk]))
+    return _redirect_after_post(request, reverse("employee_detail", args=[employee.pk]))
 
 
 @login_required
@@ -475,6 +485,9 @@ def employees_import(request):
         action = request.POST.get("action", "preview")
         if action == "confirm":
             rows = request.session.get("employee_import_rows", [])
+            if not preview or preview.get("errors") or not rows:
+                messages.error(request, "Сначала загрузите файл и исправьте ошибки предпросмотра.")
+                return render(request, "hr/employees/import.html", {"preview": preview})
             result = apply_employee_import_rows(rows)
             request.session.pop("employee_import_rows", None)
             request.session.pop("employee_import_preview", None)
@@ -495,6 +508,9 @@ def employees_import(request):
                 write_change=False,
             )
         else:
+            request.session.pop("employee_import_rows", None)
+            request.session.pop("employee_import_preview", None)
+            preview = None
             upload = request.FILES.get("file")
             if not upload:
                 messages.error(request, "Выберите файл .xlsx для предпросмотра.")
@@ -550,7 +566,7 @@ def employee_columns_update(request):
         request.POST.get("page_size"),
     )
     messages.success(request, "Настройки таблицы сохранены.")
-    return redirect(request.POST.get("next") or reverse("employees_list"))
+    return _redirect_after_post(request, reverse("employees_list"))
 
 
 def _probation_stage_due(probation, offset_days):
